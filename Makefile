@@ -77,6 +77,7 @@ install:
 	@install -Dvm 644 -t $(MODDIR)/mt76/mt76x0 mt76x0/*.ko
 	@install -Dvm 644 -t $(MODDIR)/mt76/mt76x2 mt76x2/*.ko
 	@install -Dvm 644 -t $(MODDIR)/mt76/mt7921 mt7921/*.ko
+	@install -Dvm 644 -t /etc/modprobe.d blacklist-mt76.conf
 	depmod -a $(KVER)
 	@echo "The mt76 drivers were installed successfully."
 
