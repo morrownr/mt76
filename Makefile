@@ -88,6 +88,7 @@ uninstall:
 		rmmod -s $$mod || true; \
 	done
 	@rm -rvf $(MODDIR)/mt76
+	@rm -vf /etc/modprobe.d/blacklist-mt76.conf
 	@rmdir --ignore-fail-on-non-empty $(MODDIR) || true
 	depmod -a $(KVER)
 	@echo "The mt76 drivers were removed successfully."
