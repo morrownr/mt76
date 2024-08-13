@@ -55,6 +55,7 @@ SHELL := /bin/sh
 KVER ?= `uname -r`
 KSRC ?= /lib/modules/$(KVER)/build
 MODDIR ?= /lib/modules/$(KVER)/extra
+FWDIR := /lib/firmware/mediatek
 MODLIST := mtk76x0u mtk76x2u mtk7921u \
 	   mtk76x0_common mtk76x2_common mtk7921_common \
 	   mtk76x02_usb mtk792x_usb mtk76_usb mtk76x02_lib mtk792x_lib \
@@ -77,6 +78,7 @@ install:
 	@install -Dvm 644 -t $(MODDIR)/mt76/mt76x0 mt76x0/*.ko
 	@install -Dvm 644 -t $(MODDIR)/mt76/mt76x2 mt76x2/*.ko
 	@install -Dvm 644 -t $(MODDIR)/mt76/mt7921 mt7921/*.ko
+	@install -Dvm 644 -t $(FWDIR) firmware/*.bin
 	@install -Dvm 644 -t /etc/modprobe.d blacklist-mt76.conf
 	depmod -a $(KVER)
 	@echo "The mt76 drivers were installed successfully."
