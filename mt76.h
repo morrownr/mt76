@@ -15,7 +15,12 @@
 #include <linux/average.h>
 #include <linux/soc/mediatek/mtk_wed.h>
 #include <net/mac80211.h>
+#include <linux/version.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,6,0)
+#include <net/page_pool.h>
+#else
 #include <net/page_pool/helpers.h>
+#endif
 #include "util.h"
 #include "testmode.h"
 
