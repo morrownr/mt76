@@ -980,7 +980,11 @@ mt76_dma_init(struct mt76_dev *dev,
 	init_completion(&dev->mmio.wed_reset_complete);
 
 	mt76_for_each_q_rx(dev, i) {
-		netif_napi_add(dev->napi_dev, &dev->napi[i], poll);
+	#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
+		netif_napi_add(&dev->napi_dev, &dev->napi[i], poll, NAPI_POLL_WEIGHT);
+	#else
+		netif_napi_add(&dev->napi_dev, &dev->napi[i], poll);
+	#endif
 		mt76_dma_rx_fill_buf(dev, &dev->q_rx[i], false);
 		napi_enable(&dev->napi[i]);
 	}
