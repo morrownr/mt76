@@ -104,6 +104,6 @@ endif
 	@for mod in $(shell find . -name "*.ko"); do \
 		$(KSRC)/scripts/sign-file sha256 MOK.priv MOK.der $$mod; \
 	done
-	@echo "All built modules are signed successfully."
+	@echo "All built modules signed successfully."
 
 endif
