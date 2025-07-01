@@ -980,11 +980,7 @@ mt76_dma_init(struct mt76_dev *dev,
 	init_completion(&dev->mmio.wed_reset_complete);
 
 	mt76_for_each_q_rx(dev, i) {
-	#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
-		netif_napi_add(&dev->napi_dev, &dev->napi[i], poll, NAPI_POLL_WEIGHT);
-	#else
-		netif_napi_add(&dev->napi_dev, &dev->napi[i], poll);
-	#endif
+		netif_napi_add(dev->napi_dev, &dev->napi[i], poll);
 		mt76_dma_rx_fill_buf(dev, &dev->q_rx[i], false);
 		napi_enable(&dev->napi[i]);
 	}
@@ -1015,6 +1011,7 @@ void mt76_dma_cleanup(struct mt76_dev *dev)
 	int i;
 
 	mt76_worker_disable(&dev->tx_worker);
+	napi_disable(&dev->tx_napi);
 	netif_napi_del(&dev->tx_napi);
 
 	for (i = 0; i < ARRAY_SIZE(dev->phys); i++) {

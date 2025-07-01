@@ -216,7 +216,7 @@ static int mt7603_set_sar_specs(struct ieee80211_hw *hw,
 }
 
 static int
-mt7603_config(struct ieee80211_hw *hw, u32 changed)
+mt7603_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
 {
 	struct mt7603_dev *dev = hw->priv;
 	int ret = 0;
@@ -657,7 +657,8 @@ mt7603_sta_rate_tbl_update(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 }
 
 static void
-mt7603_set_coverage_class(struct ieee80211_hw *hw, s16 coverage_class)
+mt7603_set_coverage_class(struct ieee80211_hw *hw, int radio_idx,
+			  s16 coverage_class)
 {
 	struct mt7603_dev *dev = hw->priv;
 
@@ -692,12 +693,10 @@ static void mt7603_tx(struct ieee80211_hw *hw,
 }
 
 const struct ieee80211_ops mt7603_ops = {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
 	.add_chanctx = ieee80211_emulate_add_chanctx,
 	.remove_chanctx = ieee80211_emulate_remove_chanctx,
 	.change_chanctx = ieee80211_emulate_change_chanctx,
 	.switch_vif_chanctx = ieee80211_emulate_switch_vif_chanctx,
-#endif
 	.tx = mt7603_tx,
 	.start = mt7603_start,
 	.stop = mt7603_stop,

@@ -4,12 +4,7 @@
  * Copyright (C) 2018 Lorenzo Bianconi <lorenzo.bianconi83@gmail.com>
  */
 
-#include <linux/version.h>
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-#include <asm/unaligned.h>
-#else
 #include <linux/unaligned.h>
-#endif
 
 #include "mt76x02_eeprom.h"
 

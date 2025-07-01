@@ -50,7 +50,7 @@ int mt76x2u_set_channel(struct mt76_phy *mphy)
 }
 
 static int
-mt76x2u_config(struct ieee80211_hw *hw, u32 changed)
+mt76x2u_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
 {
 	struct mt76x02_dev *dev = hw->priv;
 	int err = 0;
@@ -88,12 +88,10 @@ mt76x2u_config(struct ieee80211_hw *hw, u32 changed)
 }
 
 const struct ieee80211_ops mt76x2u_ops = {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
 	.add_chanctx = ieee80211_emulate_add_chanctx,
 	.remove_chanctx = ieee80211_emulate_remove_chanctx,
 	.change_chanctx = ieee80211_emulate_change_chanctx,
 	.switch_vif_chanctx = ieee80211_emulate_switch_vif_chanctx,
-#endif
 	.tx = mt76x02_tx,
 	.start = mt76x2u_start,
 	.stop = mt76x2u_stop,
