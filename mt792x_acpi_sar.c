@@ -424,7 +424,33 @@ mt792x_acpi_parse_mtcl_tbl_v3(struct mt792x_phy *phy, char *alpha2)
 		goto out;
 
 	if (!cl)
-		return 0xc;
+		return MT792X_ACPI_MTCL_INVALID;
+
+	for (i = 0; i < ARRAY_SIZE(cc_list_be); i++) {
+		col = 7 - i % 8;
+		row = i / 8;
+		if (!memcmp(cc_list_be[i], alpha2, 2))
+			return mt792x_acpi_get_mtcl_map_v3(row, col, cl);
+	}
+	for (i = 0; i < ARRAY_SIZE(cc_list_eu); i++) {
+		if (!memcmp(cc_list_eu[i], alpha2, 2))
+			return mt792x_acpi_get_mtcl_map_v3(3, 7, cl);
+	}
+
+out:
+	/* Depends on driver */
+	return 0x20;
+}
+
+static u32
+mt792x_acpi_parse_mtcl_tbl(struct mt792x_phy *phy, char *alpha2)
+{
+	struct mt792x_acpi_sar *sar = phy->acpisar;
+	struct mt792x_asar_cl *cl = sar->countrylist;
+	int col, row, i;
+
+	if (!cl)
+		return MT792X_ACPI_MTCL_INVALID;
 
 	for (i = 0; i < ARRAY_SIZE(cc_list_all); i++) {
 		col = 7 - i % 8;
