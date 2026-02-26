@@ -427,7 +427,7 @@ mt76_connac2_mac_write_txwi_80211(struct mt76_dev *dev, __le32 *txwi,
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
 	if (ieee80211_is_action(fc) &&
-	    skb->len >= IEEE80211_MIN_ACTION_SIZE(addba_req) &&
+	    skb->len >= IEEE80211_MIN_ACTION_SIZE(addba_req.capab) &&
 	    mgmt->u.action.category == WLAN_CATEGORY_BACK &&
 	    mgmt->u.action.action_code == WLAN_ACTION_ADDBA_REQ) {
 		u16 capab = le16_to_cpu(mgmt->u.action.addba_req.capab);

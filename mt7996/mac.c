@@ -776,7 +776,7 @@ mt7996_mac_write_txwi_80211(struct mt7996_dev *dev, __le32 *txwi,
 /* compat: see note in mt76_connac_mac.c -- 7.1 mac80211 action API change */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
 	if (ieee80211_is_action(fc) &&
-	    skb->len >= IEEE80211_MIN_ACTION_SIZE(addba_req) &&
+	    skb->len >= IEEE80211_MIN_ACTION_SIZE(action_code) &&
 	    mgmt->u.action.category == WLAN_CATEGORY_BACK &&
 	    mgmt->u.action.action_code == WLAN_ACTION_ADDBA_REQ) {
 #else
