@@ -241,14 +241,6 @@ Compatibility patches in `compat-patches/`:
 - **No SoC code**: MT7622_WMAC, MT798X_WMAC, NPU configs left as no-ops (never
   defined on desktop/laptop kernels, code compiles out)
 
-## Next Steps
-
-- [ ] Nick review of install/uninstall/check scripts
-- [ ] Test on ARM64 (Raspberry Pi 5)
-- [ ] Test DKMS path end-to-end
-- [ ] Firmware install_fw target testing
-- [ ] Evaluate sign-install Makefile target for Secure Boot
-
 ## License
 
 This program is free software; you can redistribute it and/or modify it under
