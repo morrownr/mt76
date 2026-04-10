@@ -236,6 +236,31 @@ if command -v lspci >/dev/null 2>&1; then
 		FOUND_HW=1
 	fi
 fi
+# sysfs fallback: scan for USB devices bound to any mt76-family driver.
+# Catches rebadged adapters (e.g. NetGear A8500, 0846:9072) where lsusb
+# shows the rebadger's vendor ID instead of MediaTek's 0e8d, and the
+# vendor-string regex above never sees "mediatek" or "mt76".
+if [ "${FOUND_HW}" -eq 0 ]; then
+	for drv_path in /sys/bus/usb/drivers/mt7*; do
+		[ -d "${drv_path}" ] || continue
+		drv_name=$(basename "${drv_path}")
+		for dev_link in "${drv_path}"/*; do
+			[ -L "${dev_link}" ] || continue
+			dev_base=$(basename "${dev_link}")
+			[ "${dev_base}" = "module" ] && continue
+			dev_vid=$(cat "${dev_link}/idVendor" 2>/dev/null)
+			dev_pid=$(cat "${dev_link}/idProduct" 2>/dev/null)
+			dev_mfg=$(cat "${dev_link}/manufacturer" 2>/dev/null)
+			dev_prd=$(cat "${dev_link}/product" 2>/dev/null)
+			if [ -n "${dev_vid}" ] && [ -n "${dev_pid}" ]; then
+				printf "    %s: ID %s:%s %s %s\n" "${drv_name}" "${dev_vid}" "${dev_pid}" "${dev_mfg}" "${dev_prd}"
+			else
+				printf "    %s: %s\n" "${drv_name}" "${dev_base}"
+			fi
+			FOUND_HW=1
+		done
+	done
+fi
 if [ "${FOUND_HW}" -eq 0 ]; then
 	printf '    %s(none detected -- modules will still be installed)%s\n' "${DIM}" "${NC}"
 fi
