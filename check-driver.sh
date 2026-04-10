@@ -45,12 +45,16 @@ OPTIONS_FILE="mt76_git.conf"
 # Color support (auto-disabled when not writing to a terminal)
 # ---------------------------------------------------------------------------
 if [ -t 1 ]; then
-	GREEN='\033[0;32m'
-	RED='\033[0;31m'
-	YELLOW='\033[1;33m'
-	CYAN='\033[0;36m'
-	BOLD='\033[1m'
-	NC='\033[0m'
+	# Use command substitution so the variables hold real ESC bytes,
+	# not the literal backslash-escape sequence. This keeps every
+	# existing `printf '%s'` call site working: printf %s does not
+	# interpret backslash escapes in its arguments, only %b does.
+	GREEN=$(printf '\033[0;32m')
+	RED=$(printf '\033[0;31m')
+	YELLOW=$(printf '\033[1;33m')
+	CYAN=$(printf '\033[0;36m')
+	BOLD=$(printf '\033[1m')
+	NC=$(printf '\033[0m')
 else
 	GREEN='' RED='' YELLOW='' CYAN='' BOLD='' NC=''
 fi
