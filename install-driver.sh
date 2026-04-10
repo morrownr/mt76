@@ -61,7 +61,7 @@ else
 fi
 
 # helper: step counter
-TOTAL_STEPS=6
+TOTAL_STEPS=7
 step() {
 	printf '\n%s%s[%s/%s]%s %s%s%s\n' "${BOLD}" "${CYAN}" "$1" "${TOTAL_STEPS}" "${NC}" "${BOLD}" "$2" "${NC}"
 }
@@ -87,16 +87,21 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # support for the NoPrompt option allows non-interactive use of this script
+# NoFirmware skips copying the bundled firmware blobs into /lib/firmware/mediatek
 NO_PROMPT=0
+SKIP_FIRMWARE=0
 while [ $# -gt 0 ]
 do
 	case $1 in
 		NoPrompt)
 			NO_PROMPT=1 ;;
+		NoFirmware)
+			SKIP_FIRMWARE=1 ;;
 		*h|*help|*)
-			echo "Syntax $0 <NoPrompt>"
-			echo "       NoPrompt - noninteractive mode"
-			echo "       -h|--help - Show help"
+			echo "Syntax $0 <NoPrompt> <NoFirmware>"
+			echo "       NoPrompt   - noninteractive mode"
+			echo "       NoFirmware - skip firmware installation"
+			echo "       -h|--help  - Show help"
 			exit 1
 			;;
 	esac
@@ -322,8 +327,48 @@ cp -f ${OPTIONS_FILE} /etc/modprobe.d
 printf '%s  Done.%s\n' "${GREEN}" "${NC}"
 
 
-# ===== STEP 4: Build =====================================================
-step 4 "Building modules"
+# ===== STEP 4: Install firmware ===========================================
+step 4 "Installing firmware"
+
+FW_SRC="${DRV_DIR}/firmware"
+FW_DEST="/lib/firmware/mediatek"
+
+if [ "${SKIP_FIRMWARE}" -eq 1 ]; then
+	printf '  %sSkipped (NoFirmware flag set).%s\n' "${YELLOW}" "${NC}"
+	printf '  %sTesters should confirm linux-firmware is current before reporting bugs.%s\n' "${DIM}" "${NC}"
+elif [ ! -d "${FW_SRC}" ]; then
+	printf '  %sFirmware source directory not found at %s -- skipping.%s\n' "${YELLOW}" "${FW_SRC}" "${NC}"
+else
+	mkdir -p "${FW_DEST}"
+	FW_COUNT=0
+
+	# top-level .bin files (mt7610, mt7662, mt7902, mt7922, mt7961)
+	for f in "${FW_SRC}"/*.bin; do
+		[ -f "$f" ] || continue
+		cp -f "$f" "${FW_DEST}/"
+		FW_COUNT=$((FW_COUNT + 1))
+	done
+
+	# mt7925 subdirectory
+	if [ -d "${FW_SRC}/mt7925" ]; then
+		mkdir -p "${FW_DEST}/mt7925"
+		for f in "${FW_SRC}/mt7925"/*.bin; do
+			[ -f "$f" ] || continue
+			cp -f "$f" "${FW_DEST}/mt7925/"
+			FW_COUNT=$((FW_COUNT + 1))
+		done
+	fi
+
+	if [ "${FW_COUNT}" -gt 0 ]; then
+		printf '%s  Installed %s firmware file(s) to %s%s\n' "${GREEN}" "${FW_COUNT}" "${FW_DEST}" "${NC}"
+	else
+		printf '  %sNo firmware files found in %s%s\n' "${YELLOW}" "${FW_SRC}" "${NC}"
+	fi
+fi
+
+
+# ===== STEP 5: Build =====================================================
+step 5 "Building modules"
 
 if ! command -v dkms >/dev/null 2>&1; then
 	printf '  %s(non-dkms build with %s cores)%s\n' "${DIM}" "${sproc}" "${NC}"
@@ -370,8 +415,8 @@ else
 fi
 
 
-# ===== STEP 5: Install ===================================================
-step 5 "Installing modules"
+# ===== STEP 6: Install ===================================================
+step 6 "Installing modules"
 
 if ! command -v dkms >/dev/null 2>&1; then
 	# non-dkms: check for secure boot
@@ -405,8 +450,8 @@ fi
 printf '%s  Installed %s module(s) for kernel %s.%s\n' "${GREEN}" "${MOD_COUNT}" "${KVER}" "${NC}"
 
 
-# ===== STEP 6: Verify ====================================================
-step 6 "Verifying installation"
+# ===== STEP 7: Verify ====================================================
+step 7 "Verifying installation"
 
 VERIFY_OK=1
 
