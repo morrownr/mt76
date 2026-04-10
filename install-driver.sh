@@ -248,10 +248,13 @@ if [ "${FOUND_HW}" -eq 0 ]; then
 			[ -L "${dev_link}" ] || continue
 			dev_base=$(basename "${dev_link}")
 			[ "${dev_base}" = "module" ] && continue
-			dev_vid=$(cat "${dev_link}/idVendor" 2>/dev/null)
-			dev_pid=$(cat "${dev_link}/idProduct" 2>/dev/null)
-			dev_mfg=$(cat "${dev_link}/manufacturer" 2>/dev/null)
-			dev_prd=$(cat "${dev_link}/product" 2>/dev/null)
+			# idVendor/idProduct/manufacturer/product live on the USB
+			# device one level up from the interface binding, so read
+			# from "${dev_link}/../" not "${dev_link}/"
+			dev_vid=$(cat "${dev_link}/../idVendor" 2>/dev/null)
+			dev_pid=$(cat "${dev_link}/../idProduct" 2>/dev/null)
+			dev_mfg=$(cat "${dev_link}/../manufacturer" 2>/dev/null)
+			dev_prd=$(cat "${dev_link}/../product" 2>/dev/null)
 			if [ -n "${dev_vid}" ] && [ -n "${dev_pid}" ]; then
 				printf "    %s: ID %s:%s %s %s\n" "${drv_name}" "${dev_vid}" "${dev_pid}" "${dev_mfg}" "${dev_prd}"
 			else
