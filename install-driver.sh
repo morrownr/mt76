@@ -1,0 +1,489 @@
+#!/bin/sh
+
+# Purpose: Install MediaTek mt76 out-of-kernel WiFi drivers.
+#
+# Supports dkms and non-dkms installations.
+#
+# To make this file executable:
+#
+# $ chmod +x install-driver.sh
+#
+# To execute this file:
+#
+# $ sudo ./install-driver.sh
+#
+# or
+#
+# $ sudo sh install-driver.sh
+#
+# To check for errors:
+#
+# $ shellcheck install-driver.sh
+#
+# Copyright(c) 2025-2026 Nick Morrow, Devin (Lucid_Duck)
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of version 2 of the GNU General Public License as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+SCRIPT_NAME="install-driver.sh"
+SCRIPT_VERSION="20260408"
+
+DRV_NAME="mt76"
+DRV_VERSION="1.0"
+DRV_DIR="$(pwd)"
+
+OPTIONS_FILE="mt76_git.conf"
+
+KARCH="$(uname -m)"
+KVER="$(uname -r)"
+
+MODDESTDIR="/lib/modules/${KVER}/extra/mt76"
+
+# ---------------------------------------------------------------------------
+# Color support (auto-disabled when not writing to a terminal)
+# ---------------------------------------------------------------------------
+if [ -t 1 ]; then
+	GREEN='\033[0;32m'
+	RED='\033[0;31m'
+	YELLOW='\033[1;33m'
+	CYAN='\033[0;36m'
+	BOLD='\033[1m'
+	DIM='\033[2m'
+	NC='\033[0m'
+else
+	GREEN='' RED='' YELLOW='' CYAN='' BOLD='' DIM='' NC=''
+fi
+
+# helper: step counter
+TOTAL_STEPS=6
+step() {
+	printf '\n%s%s[%s/%s]%s %s%s%s\n' "${BOLD}" "${CYAN}" "$1" "${TOTAL_STEPS}" "${NC}" "${BOLD}" "$2" "${NC}"
+}
+
+# helper: print an error block
+die_error() {
+	printf '%sAn error occurred: %s%s\n' "${RED}" "$1" "${NC}"
+	echo "Please report this error."
+	echo "Please copy and post the following items into the problem report."
+	echo "    -all screen output from ${SCRIPT_NAME}"
+	echo "You should run the following before reattempting installation."
+	echo "$ sudo ./uninstall-driver.sh"
+	exit "$1"
+}
+
+# ---------------------------------------------------------------------------
+# Root check
+# ---------------------------------------------------------------------------
+if [ "$(id -u)" -ne 0 ]; then
+	printf '%sYou must run this script with superuser (root) privileges.%s\n' "${RED}" "${NC}"
+	echo "Try: \"sudo ./${SCRIPT_NAME}\""
+	exit 1
+fi
+
+# support for the NoPrompt option allows non-interactive use of this script
+NO_PROMPT=0
+while [ $# -gt 0 ]
+do
+	case $1 in
+		NoPrompt)
+			NO_PROMPT=1 ;;
+		*h|*help|*)
+			echo "Syntax $0 <NoPrompt>"
+			echo "       NoPrompt - noninteractive mode"
+			echo "       -h|--help - Show help"
+			exit 1
+			;;
+	esac
+	shift
+done
+
+# set default editor
+DEFAULT_EDITOR="nano"
+for TEXT_EDITOR in "${VISUAL}" "${EDITOR}" "${DEFAULT_EDITOR}" vi; do
+	command -v "${TEXT_EDITOR}" >/dev/null 2>&1 && break
+done
+
+# ===========================================================================
+# Banner
+# ===========================================================================
+if [ $NO_PROMPT -ne 1 ]; then
+	printf '%s%sPlease copy and post all displayed lines when reporting an issue!%s\n' "${BOLD}" "${YELLOW}" "${NC}"
+	printf "Press Enter to continue..."
+	read -r yn
+fi
+
+printf '\n%s' "${BOLD}"
+printf "  ================================================================\n"
+printf "     mt76 WiFi Driver Installer\n"
+printf '  ================================================================%s\n' "${NC}"
+printf '  %s v%s\n' "${SCRIPT_NAME}" "${SCRIPT_VERSION}"
+
+# git commit
+if command -v git >/dev/null 2>&1 && [ -d "${DRV_DIR}/.git" ]; then
+	GIT_HASH=$(git -C "${DRV_DIR}" rev-parse --short HEAD 2>/dev/null)
+	GIT_DIRTY=""
+	if ! git -C "${DRV_DIR}" diff --quiet HEAD 2>/dev/null; then
+		GIT_DIRTY="-dirty"
+	fi
+	printf '  Source:  %s%s%s\n' "${CYAN}" "${GIT_HASH}${GIT_DIRTY}" "${NC}"
+fi
+
+# distro
+if command -v lsb_release >/dev/null 2>&1; then
+	DISTRO=$(lsb_release -sd 2>/dev/null)
+	printf "  Distro:  %s\n" "${DISTRO}"
+elif [ -f /etc/os-release ]; then
+	# shellcheck disable=SC1091
+	. /etc/os-release
+	printf "  Distro:  %s\n" "${PRETTY_NAME:-${NAME} ${VERSION}}"
+fi
+
+printf "  Kernel:  %s (%s)\n" "${KVER}" "${KARCH}"
+
+# kernel parameters
+if [ -f /proc/cmdline ]; then
+	KPARAMS=$(sed 's/root=[^ ]*//;s/[ ]\+/, /g;s/^BOOT_IMAGE=[^ ]*//' /proc/cmdline | sed 's/^, //')
+	if [ -n "${KPARAMS}" ]; then
+		printf "  Params:  %s\n" "${KPARAMS}"
+	fi
+fi
+
+# memory and CPU
+SMEM=$(LC_ALL=C free | awk '/Mem:/ { print $2 }')
+sproc=$(nproc)
+# avoid Out of Memory condition in low-RAM systems by limiting core usage
+if [ "$sproc" -gt 1 ]; then
+	if [ "$SMEM" -lt 1400000 ]; then
+		sproc=2
+	fi
+	if [ "$SMEM" -lt 700000 ]; then
+		sproc=1
+	fi
+fi
+
+printf "  CPUs:    %s/%s (in-use/total)\n" "${sproc}" "$(nproc)"
+printf "  Memory:  %s kB\n" "${SMEM}"
+
+# gcc
+gcc_ver=$(gcc --version 2>/dev/null | head -1)
+printf "  gcc:     %s\n" "${gcc_ver}"
+
+# dkms
+if command -v dkms >/dev/null 2>&1; then
+	dkms_ver=$(dkms --version 2>/dev/null)
+	printf "  dkms:    %s\n" "${dkms_ver}"
+fi
+
+# Secure Boot
+if command -v mokutil >/dev/null 2>&1; then
+	case $(mokutil --sb-state 2>&1) in
+		*enabled*)  printf '  SecBoot: %senabled%s\n' "${YELLOW}" "${NC}" ;;
+		*disabled*) printf "  SecBoot: disabled\n" ;;
+		*)          printf "  SecBoot: not supported\n" ;;
+	esac
+else
+	printf '  SecBoot: %sunknown (mokutil not installed)%s\n' "${DIM}" "${NC}"
+fi
+
+# VM detection
+VM_INFO=$(dmesg 2>/dev/null | grep -i hypervisor | head -1)
+if [ -n "${VM_INFO}" ]; then
+	printf "  VM:      %s\n" "${VM_INFO}"
+fi
+
+# regulatory
+if command -v iw >/dev/null 2>&1; then
+	REG_COUNTRY=$(iw reg get 2>/dev/null | grep -m1 country)
+	if [ -n "${REG_COUNTRY}" ]; then
+		printf "  Reg:     %s\n" "${REG_COUNTRY}"
+	fi
+fi
+
+# hardware detection
+echo
+printf '  %sDetected mt76 hardware:%s\n' "${BOLD}" "${NC}"
+FOUND_HW=0
+if command -v lsusb >/dev/null 2>&1; then
+	lsusb_mt76=$(lsusb 2>/dev/null | grep -iE "mediatek|mt76|0e8d:" | head -10)
+	if [ -n "${lsusb_mt76}" ]; then
+		echo "${lsusb_mt76}" | while IFS= read -r line; do
+			printf "    %s\n" "${line}"
+		done
+		FOUND_HW=1
+	fi
+fi
+if command -v lspci >/dev/null 2>&1; then
+	lspci_mt76=$(lspci 2>/dev/null | grep -iE "mediatek|mt76" | head -10)
+	if [ -n "${lspci_mt76}" ]; then
+		echo "${lspci_mt76}" | while IFS= read -r line; do
+			printf "    %s\n" "${line}"
+		done
+		FOUND_HW=1
+	fi
+fi
+if [ "${FOUND_HW}" -eq 0 ]; then
+	printf '    %s(none detected -- modules will still be installed)%s\n' "${DIM}" "${NC}"
+fi
+printf '  %s----------------------------------------------------------------%s\n' "${BOLD}" "${NC}"
+
+
+# ===== STEP 1: Prerequisites =============================================
+step 1 "Checking prerequisites"
+
+MISSING=""
+if ! command -v "${TEXT_EDITOR}" >/dev/null 2>&1; then
+	MISSING="${MISSING} ${DEFAULT_EDITOR}"
+fi
+if ! command -v gcc >/dev/null 2>&1; then
+	MISSING="${MISSING} gcc"
+fi
+# ensure /usr/sbin is in the PATH so iw can be found
+if ! echo "$PATH" | grep -qw sbin; then
+	export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+fi
+if ! command -v iw >/dev/null 2>&1; then
+	MISSING="${MISSING} iw"
+fi
+if ! command -v bc >/dev/null 2>&1; then
+	MISSING="${MISSING} bc"
+fi
+if ! command -v make >/dev/null 2>&1; then
+	MISSING="${MISSING} make"
+fi
+
+if [ -n "${MISSING}" ]; then
+	printf '%sMissing required packages:%s%s\n' "${RED}" "${NC}" "${MISSING}"
+	echo "Please install them and run \"sudo ./${SCRIPT_NAME}\" again."
+	exit 1
+fi
+printf '%s  All prerequisites found.%s\n' "${GREEN}" "${NC}"
+
+# check for kernel header files
+if [ ! -d "/lib/modules/${KVER}/build" ]; then
+	printf '%s  Kernel headers not found for %s%s\n' "${RED}" "${KVER}" "${NC}"
+	echo "  Please install them and try again."
+	exit 1
+fi
+printf '%s  Kernel headers present.%s\n' "${GREEN}" "${NC}"
+
+
+# ===== STEP 2: Clean previous installation ===============================
+step 2 "Removing previous installation (if any)"
+
+# ensure directory is clean
+make clean >/dev/null 2>&1
+
+# check for and uninstall non-dkms installations
+if [ -d "${MODDESTDIR}" ]; then
+	printf "  Removing non-dkms modules from %s\n" "${MODDESTDIR}"
+	rm -rf "${MODDESTDIR}"
+	/sbin/depmod -a "${KVER}"
+fi
+
+# check for and uninstall dkms installations
+if command -v dkms >/dev/null 2>&1; then
+	dkms status 2>/dev/null | while IFS="/,: " read -r drvname drvver kerver _dummy; do
+		case "$drvname" in *mt76*)
+			if [ "${kerver}" = "added" ]; then
+				printf "  Removing from dkms: %s/%s\n" "${drvname}" "${drvver}"
+				dkms remove -m "${drvname}" -v "${drvver}" --all 2>/dev/null
+			else
+				printf "  Uninstalling from dkms: %s/%s (kernel %s)\n" "${drvname}" "${drvver}" "${kerver}"
+				dkms remove -m "${drvname}" -v "${drvver}" -k "${kerver}" \
+					-c "/usr/src/${drvname}-${drvver}/dkms.conf" 2>/dev/null
+			fi
+		esac
+	done
+	if [ -f /etc/modprobe.d/${OPTIONS_FILE} ]; then
+		printf "  Removing old %s\n" "${OPTIONS_FILE}"
+		rm -f /etc/modprobe.d/${OPTIONS_FILE}
+	fi
+	if [ -d /usr/src/${DRV_NAME}-${DRV_VERSION} ]; then
+		printf "  Removing old source from /usr/src/%s-%s\n" "${DRV_NAME}" "${DRV_VERSION}"
+		rm -rf /usr/src/${DRV_NAME}-${DRV_VERSION}
+	fi
+fi
+
+printf '%s  Clean.%s\n' "${GREEN}" "${NC}"
+
+
+# ===== STEP 3: Configure ==================================================
+step 3 "Configuring"
+
+printf "  Installing %s to /etc/modprobe.d\n" "${OPTIONS_FILE}"
+cp -f ${OPTIONS_FILE} /etc/modprobe.d
+
+printf '%s  Done.%s\n' "${GREEN}" "${NC}"
+
+
+# ===== STEP 4: Build =====================================================
+step 4 "Building modules"
+
+if ! command -v dkms >/dev/null 2>&1; then
+	printf '  %s(non-dkms build with %s cores)%s\n' "${DIM}" "${sproc}" "${NC}"
+
+	make -j"${sproc}"
+	RESULT=$?
+	[ "$RESULT" != "0" ] && die_error "$RESULT"
+
+	printf '%s  Build complete.%s\n' "${GREEN}" "${NC}"
+else
+	printf '  %s(dkms build)%s\n' "${DIM}" "${NC}"
+
+	# copy source for dkms
+	printf "  Copying source to /usr/src/%s-%s\n" "${DRV_NAME}" "${DRV_VERSION}"
+	cp -r "${DRV_DIR}" /usr/src/${DRV_NAME}-${DRV_VERSION}
+
+	# dkms add
+	dkms add -m ${DRV_NAME} -v ${DRV_VERSION} -k "${KVER}" \
+		-c "/usr/src/${DRV_NAME}-${DRV_VERSION}/dkms.conf"
+	RESULT=$?
+
+	if [ "$RESULT" != "0" ]; then
+		if [ "$RESULT" = "3" ]; then
+			printf '%s  Already in dkms tree. Run uninstall-driver.sh first.%s\n' "${YELLOW}" "${NC}"
+			exit $RESULT
+		fi
+		die_error "$RESULT"
+	fi
+	printf '%s  Added to dkms.%s\n' "${GREEN}" "${NC}"
+
+	# dkms build
+	if command -v /usr/bin/time >/dev/null 2>&1; then
+		/usr/bin/time -f "  Compile time: %U seconds" \
+			dkms build -m ${DRV_NAME} -v ${DRV_VERSION} -k "${KVER}" \
+			-c "/usr/src/${DRV_NAME}-${DRV_VERSION}/dkms.conf" --force
+	else
+		dkms build -m ${DRV_NAME} -v ${DRV_VERSION} -k "${KVER}" \
+			-c "/usr/src/${DRV_NAME}-${DRV_VERSION}/dkms.conf" --force
+	fi
+	RESULT=$?
+	[ "$RESULT" != "0" ] && die_error "$RESULT"
+
+	printf '%s  Build complete.%s\n' "${GREEN}" "${NC}"
+fi
+
+
+# ===== STEP 5: Install ===================================================
+step 5 "Installing modules"
+
+if ! command -v dkms >/dev/null 2>&1; then
+	# non-dkms: check for secure boot
+	if command -v mokutil >/dev/null 2>&1; then
+		if mokutil --sb-state 2>/dev/null | grep -qi enabled; then
+			printf '  %sSecure Boot enabled -- using sign-install%s\n' "${YELLOW}" "${NC}"
+			make sign-install
+			RESULT=$?
+		else
+			make install
+			RESULT=$?
+		fi
+	else
+		make install
+		RESULT=$?
+	fi
+	[ "$RESULT" != "0" ] && die_error "$RESULT"
+else
+	# dkms install
+	dkms install -m ${DRV_NAME} -v ${DRV_VERSION} -k "${KVER}" \
+		-c "/usr/src/${DRV_NAME}-${DRV_VERSION}/dkms.conf" --force
+	RESULT=$?
+	[ "$RESULT" != "0" ] && die_error "$RESULT"
+fi
+
+# count installed modules
+MOD_COUNT=$(find "${MODDESTDIR}" -name "*_git.ko*" 2>/dev/null | wc -l)
+if [ "${MOD_COUNT}" -eq 0 ] && command -v dkms >/dev/null 2>&1; then
+	MOD_COUNT=$(find /lib/modules/"${KVER}"/updates -name "*_git.ko*" 2>/dev/null | wc -l)
+fi
+printf '%s  Installed %s module(s) for kernel %s.%s\n' "${GREEN}" "${MOD_COUNT}" "${KVER}" "${NC}"
+
+
+# ===== STEP 6: Verify ====================================================
+step 6 "Verifying installation"
+
+VERIFY_OK=1
+
+if [ "${MOD_COUNT}" -eq 0 ]; then
+	printf '  %sNo _git modules found after install!%s\n' "${RED}" "${NC}"
+	VERIFY_OK=0
+else
+	printf '  %sModule count: %s%s\n' "${GREEN}" "${MOD_COUNT}" "${NC}"
+fi
+
+if modinfo mt76_git >/dev/null 2>&1; then
+	GIT_VER=$(modinfo -F version mt76_git 2>/dev/null)
+	printf '  %smt76_git resolvable by depmod (version: %s)%s\n' "${GREEN}" "${GIT_VER:-unknown}" "${NC}"
+else
+	printf '  %smodinfo cannot find mt76_git (normal before reboot)%s\n' "${YELLOW}" "${NC}"
+fi
+
+if [ -f /etc/modprobe.d/${OPTIONS_FILE} ]; then
+	printf '  %sBlacklist config installed%s\n' "${GREEN}" "${NC}"
+else
+	printf '  %sBlacklist config MISSING!%s\n' "${RED}" "${NC}"
+	VERIFY_OK=0
+fi
+
+if [ "${VERIFY_OK}" -eq 1 ]; then
+	printf '  %sAll checks passed.%s\n' "${GREEN}" "${NC}"
+else
+	printf '  %sSome checks need attention -- see above.%s\n' "${YELLOW}" "${NC}"
+fi
+
+# unblock wifi
+if command -v rfkill >/dev/null 2>&1; then
+	rfkill unblock wlan
+fi
+
+
+# ===========================================================================
+# Success banner
+# ===========================================================================
+printf '\n%s' "${GREEN}"
+printf "         .--.        \n"
+printf "        /    \\       \n"
+printf "       /  ..  \\      \n"
+printf "      / .'  '. \\     \n"
+printf "     / '      ' \\    \n"
+printf "    /............\\   \n"
+printf "          ||          \n"
+printf "          ||          \n"
+printf '%s\n' "${NC}"
+printf '  %s%sInstallation complete!%s\n' "${BOLD}" "${GREEN}" "${NC}"
+printf "\n"
+printf '  %s================================================================%s\n' "${BOLD}" "${NC}"
+printf "  Update this driver:\n"
+printf '    %s$ git pull%s\n' "${CYAN}" "${NC}"
+printf '    %s$ sudo sh install-driver.sh%s\n' "${CYAN}" "${NC}"
+printf "\n"
+printf "  Diagnose problems:\n"
+printf '    %s$ ./check-driver.sh%s\n' "${CYAN}" "${NC}"
+printf "\n"
+printf '  %sTip: Update before distro or kernel upgrades.%s\n' "${DIM}" "${NC}"
+printf '  %sTip: Updates can be run as often as you like (recommended: monthly).%s\n' "${DIM}" "${NC}"
+printf '  %s================================================================%s\n' "${BOLD}" "${NC}"
+printf "\n"
+
+# if NoPrompt is not used, ask user some questions
+if [ $NO_PROMPT -ne 1 ]; then
+	printf "Do you want to edit the driver options file now? (recommended) [Y/n] "
+	read -r yn
+	case "$yn" in
+		[nN]) ;;
+		*) ${TEXT_EDITOR} /etc/modprobe.d/${OPTIONS_FILE} ;;
+	esac
+
+	printf "Do you want to apply the new options by rebooting now? (recommended) [Y/n] "
+	read -r yn
+	case "$yn" in
+		[nN]) ;;
+		*) reboot ;;
+	esac
+fi

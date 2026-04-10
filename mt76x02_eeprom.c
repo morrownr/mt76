@@ -4,7 +4,11 @@
  * Copyright (C) 2018 Lorenzo Bianconi <lorenzo.bianconi83@gmail.com>
  */
 
+#if __has_include(<linux/unaligned.h>)
+#include <linux/unaligned.h>
+#else
 #include <asm/unaligned.h>
+#endif
 
 #include "mt76x02_eeprom.h"
 

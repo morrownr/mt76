@@ -5,7 +5,11 @@
 
 #include <linux/module.h>
 #include <linux/of.h>
+#if __has_include(<linux/unaligned.h>)
+#include <linux/unaligned.h>
+#else
 #include <asm/unaligned.h>
+#endif
 #include "mt76x2.h"
 #include "eeprom.h"
 

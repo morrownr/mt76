@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: GPL-2.0-only
-obj-$(CONFIG_MT76x0U) += mt76x0u.o
-obj-$(CONFIG_MT76x0E) += mt76x0e.o
-obj-$(CONFIG_MT76x0_COMMON) += mt76x0-common.o
 
-mt76x0-common-y := init.o main.o eeprom.o phy.o
+obj-m += mt76x0_common_git.o
+obj-m += mt76x0u_git.o
 
-mt76x0u-y := usb.o usb_mcu.o
-mt76x0e-y := pci.o pci_mcu.o
+ifneq ($(CONFIG_PCI),)
+obj-m += mt76x0e_git.o
+endif
 
-# ccflags-y := -DDEBUG
+mt76x0_common_git-y := init.o main.o eeprom.o phy.o
+
+mt76x0u_git-y := usb.o usb_mcu.o
+mt76x0e_git-y := pci.o pci_mcu.o

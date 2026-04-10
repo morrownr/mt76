@@ -7,6 +7,7 @@
 #define __MT76_H
 
 #include <linux/kernel.h>
+#include <linux/version.h>
 #include <linux/io.h>
 #include <linux/spinlock.h>
 #include <linux/skbuff.h>

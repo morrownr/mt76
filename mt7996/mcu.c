@@ -1312,6 +1312,7 @@ int mt7996_mcu_set_protection(struct mt7996_phy *phy, struct mt7996_vif_link *li
 				     MCU_WM_UNI_CMD(BSS_INFO_UPDATE), true);
 }
 
+#ifdef CONFIG_MT76_EML_OP_MODE
 int mt7996_mcu_set_emlsr_mode(struct mt7996_dev *dev,
 			      struct ieee80211_vif *vif,
 			      struct ieee80211_sta *sta,
@@ -1366,6 +1367,7 @@ int mt7996_mcu_set_emlsr_mode(struct mt7996_dev *dev,
 	return mt76_mcu_skb_send_msg(&dev->mt76, skb,
 				     MCU_WMWA_UNI_CMD(STA_REC_UPDATE), true);
 }
+#endif
 
 int mt7996_mcu_set_timing(struct mt7996_phy *phy, struct ieee80211_vif *vif,
 			  struct ieee80211_bss_conf *link_conf)

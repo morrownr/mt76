@@ -2485,6 +2485,7 @@ mt7996_reconfig_complete(struct ieee80211_hw *hw,
 					     MT7996_WATCHDOG_TIME);
 }
 
+#ifdef CONFIG_MT76_EML_OP_MODE
 static int
 mt7996_set_eml_op_mode(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		       struct ieee80211_sta *sta,
@@ -2499,6 +2500,7 @@ mt7996_set_eml_op_mode(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 
 	return ret;
 }
+#endif
 
 const struct ieee80211_ops mt7996_ops = {
 	.add_chanctx = mt76_add_chanctx,
@@ -2563,5 +2565,7 @@ const struct ieee80211_ops mt7996_ops = {
 	.change_vif_links = mt7996_change_vif_links,
 	.change_sta_links = mt7996_mac_sta_change_links,
 	.reconfig_complete = mt7996_reconfig_complete,
+#ifdef CONFIG_MT76_EML_OP_MODE
 	.set_eml_op_mode = mt7996_set_eml_op_mode,
+#endif
 };
