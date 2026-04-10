@@ -81,7 +81,11 @@ CFLAGS_mt76x02_trace.o := -I$(src)
 CFLAGS_mt792x_trace.o := -I$(src)
 
 # --- Chipset families (subdirectories) ---
-obj-m += mt7603/
+# MT7603 (WiFi 4) is not built by default. The chip is old, no users have
+# reported running it on this out-of-tree driver, and no firmware is shipped
+# for it in this repo. The source tree is retained so someone with an MT7603
+# adapter can reactivate it by uncommenting the line below.
+#obj-m += mt7603/
 obj-m += mt7615/
 obj-m += mt7915/
 obj-m += mt7921/
@@ -154,7 +158,7 @@ install:
 
 install_fw:
 	@echo "Installing firmware to $(FWDIR)..."
-	@# Root-level firmware (mt76x0, mt76x2, mt7603, mt7615, mt7663, mt792x)
+	@# Root-level firmware (mt76x0, mt76x2, mt792x family)
 	@install -dvm 755 $(FWDIR)
 	@for f in firmware/*.bin; do \
 		[ -f "$$f" ] || continue; \

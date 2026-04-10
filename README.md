@@ -28,16 +28,21 @@ sudo sh uninstall-driver.sh
 
 ## Supported Chipset Families
 
-| Family | Bus | Modules | WiFi Generation |
-|--------|-----|---------|-----------------|
-| MT7603 | PCIe | mt7603e | WiFi 4 (N) |
-| MT76x0 | USB, PCIe | mt76x0u, mt76x0e | WiFi 5 (AC) |
-| MT76x2 | USB, PCIe | mt76x2u, mt76x2e | WiFi 5 (AC) |
-| MT7615 | PCIe, USB, SDIO | mt7615e, mt7663u, mt7663s | WiFi 5 (AC) |
-| MT7915 | PCIe | mt7915e | WiFi 6 (AX) |
-| MT7921 | PCIe, USB, SDIO | mt7921e, mt7921u, mt7921s | WiFi 6E (AXE) |
-| MT7925 | PCIe, USB | mt7925e, mt7925u | WiFi 7 (BE) |
-| MT7996 | PCIe | mt7996e | WiFi 7 (BE) |
+| Family | Chips | Bus | Modules | WiFi Generation |
+|--------|-------|-----|---------|-----------------|
+| MT76x0 | MT7610, MT7630, MT7650 | USB, PCIe | mt76x0u, mt76x0e | WiFi 5 (AC) |
+| MT76x2 | MT7612, **MT7662** | USB, PCIe | mt76x2u, mt76x2e | WiFi 5 (AC) |
+| MT7615 | MT7615, MT7663 | PCIe, USB, SDIO | mt7615e, mt7663u, mt7663s | WiFi 5 (AC) |
+| MT7915 | MT7915, MT7906, MT7916 | PCIe | mt7915e | WiFi 6 (AX) |
+| MT7921 | MT7920, MT7921, MT7922, **MT7902** | PCIe, USB, SDIO | mt7921e, mt7921u, mt7921s | WiFi 6E (AXE) |
+| MT7925 | MT7925 | PCIe, USB | mt7925e, mt7925u | WiFi 7 (BE) |
+| MT7996 | MT7990, MT7992, MT7996 | PCIe | mt7996e | WiFi 7 (BE) |
+
+### Inactive Families
+
+| Family | Status |
+|--------|--------|
+| MT7603 | Source retained but not built by default. Old WiFi 4 chip, no user reports on this repo. Users with MT7603 hardware should rely on the in-kernel `mt7603e` driver. Reactivation is a one-line Makefile change if someone needs it. |
 
 ## Supported USB Adapters
 
@@ -114,7 +119,6 @@ sudo sh uninstall-driver.sh
 
 | Family | PCI IDs (vendor 14c3 unless noted) |
 |--------|-----|
-| MT7603 | 7603 |
 | MT76x0 | 7610, 7630, 7650 |
 | MT76x2 | 7662, 7612, 7602 |
 | MT7615 | 7615, 7663, 7611 |
@@ -127,14 +131,13 @@ sudo sh uninstall-driver.sh
 
 | File | Purpose |
 |------|---------|
-| `Makefile` | Kbuild out-of-tree Makefile for all 29 modules across 8 chipset families |
+| `Makefile` | Kbuild out-of-tree Makefile for all 28 active modules across 7 chipset families |
 | `install-driver.sh` | Full install with progress display, prerequisite checks, build, verify |
 | `uninstall-driver.sh` | Clean removal of installed modules, DKMS entries, and config |
 | `check-driver.sh` | No-root diagnostic: loaded modules, hardware, link status, firmware, dmesg |
 | `dkms.conf` | DKMS auto-rebuild on kernel updates, conditional PCI/SDIO support |
-| `mt76_git.conf` | modprobe options and blacklist for all 29 in-kernel mt76 modules |
+| `mt76_git.conf` | modprobe options and blacklist for the in-kernel mt76 modules this repo replaces |
 | `compat-patches/` | Source compatibility patches for kernels 6.6 through 6.19+ |
-| `mt7603/Makefile` | MT7603 PCIe module (WiFi 4) |
 | `mt7615/Makefile` | MT7615 family: common + PCIe + USB + SDIO (WiFi 5) |
 | `mt7915/Makefile` | MT7915 PCIe with coredump support (WiFi 6) |
 | `mt7921/Makefile` | MT7921 family: common + PCIe + USB + SDIO (WiFi 6E) |
@@ -143,7 +146,7 @@ sudo sh uninstall-driver.sh
 | `mt76x0/Makefile` | MT76x0 family: common + USB + PCIe (WiFi 5) |
 | `mt76x2/Makefile` | MT76x2 family: common + USB + PCIe (WiFi 5) |
 
-## Module Map (29 modules)
+## Module Map (28 active modules)
 
 ```
 Core and transport:
@@ -159,7 +162,6 @@ Shared libraries:
   mt792x_usb_git        MT792x USB shared
 
 Chipset families:
-  mt7603e_git           MT7603 PCIe (requires CONFIG_PCI)
   mt7615_common_git     MT7615 shared
   mt7615e_git           MT7615 PCIe
   mt7663_usb_sdio_common_git  MT7663 USB/SDIO shared
