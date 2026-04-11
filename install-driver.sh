@@ -112,6 +112,15 @@ do
 	shift
 done
 
+# If stdin is not a terminal, treat this run as implicitly non-interactive
+# even without the NoPrompt flag. Otherwise blind `read -r` calls silently
+# consume EOF and fall through to default-yes branches -- which for the
+# post-install prompts means we would reboot the host behind the user's
+# back when invoked from a pipe, cron job, cloud-init hook, or CI runner.
+if [ ! -t 0 ]; then
+	NO_PROMPT=1
+fi
+
 # Find an editor for the optional post-install modprobe.conf edit step.
 # Not a hard prerequisite -- if nothing is available we will skip the
 # interactive edit prompt and tell the user to edit the file by hand.
