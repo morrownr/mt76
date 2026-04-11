@@ -112,11 +112,17 @@ do
 	shift
 done
 
-# set default editor
-DEFAULT_EDITOR="nano"
-for TEXT_EDITOR in "${VISUAL}" "${EDITOR}" "${DEFAULT_EDITOR}" vi; do
-	command -v "${TEXT_EDITOR}" >/dev/null 2>&1 && break
+# Find an editor for the optional post-install modprobe.conf edit step.
+# Not a hard prerequisite -- if nothing is available we will skip the
+# interactive edit prompt and tell the user to edit the file by hand.
+TEXT_EDITOR=""
+for _ed in "${VISUAL:-}" "${EDITOR:-}" nano vi vim ed; do
+	if [ -n "${_ed}" ] && command -v "${_ed}" >/dev/null 2>&1; then
+		TEXT_EDITOR="${_ed}"
+		break
+	fi
 done
+unset _ed
 
 # ===========================================================================
 # Banner
@@ -274,9 +280,6 @@ printf '  %s----------------------------------------------------------------%s\n
 step 1 "Checking prerequisites"
 
 MISSING=""
-if ! command -v "${TEXT_EDITOR}" >/dev/null 2>&1; then
-	MISSING="${MISSING} ${DEFAULT_EDITOR}"
-fi
 if ! command -v gcc >/dev/null 2>&1; then
 	MISSING="${MISSING} gcc"
 fi
@@ -550,12 +553,17 @@ printf "\n"
 
 # if NoPrompt is not used, ask user some questions
 if [ $NO_PROMPT -ne 1 ]; then
-	printf "Do you want to edit the driver options file now? (recommended) [Y/n] "
-	read -r yn
-	case "$yn" in
-		[nN]) ;;
-		*) ${TEXT_EDITOR} /etc/modprobe.d/${OPTIONS_FILE} ;;
-	esac
+	if [ -n "${TEXT_EDITOR}" ]; then
+		printf "Do you want to edit the driver options file now? (recommended) [Y/n] "
+		read -r yn
+		case "$yn" in
+			[nN]) ;;
+			*) "${TEXT_EDITOR}" "/etc/modprobe.d/${OPTIONS_FILE}" ;;
+		esac
+	else
+		printf '  No text editor found on this system. You can edit\n'
+		printf '  /etc/modprobe.d/%s manually whenever you like.\n' "${OPTIONS_FILE}"
+	fi
 
 	printf "Do you want to apply the new options by rebooting now? (recommended) [Y/n] "
 	read -r yn
