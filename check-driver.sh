@@ -42,6 +42,22 @@ KARCH="$(uname -m)"
 OPTIONS_FILE="mt76_git.conf"
 
 # ---------------------------------------------------------------------------
+# Locate iw. Some distros (notably Debian) install iw in /usr/sbin and keep
+# /usr/sbin out of the default non-root PATH, so `command -v iw` returns
+# empty for a regular user even though iw is installed. Check the common
+# sbin locations as a fallback and record the full path for later use.
+# ---------------------------------------------------------------------------
+if command -v iw >/dev/null 2>&1; then
+	IW=iw
+elif [ -x /usr/sbin/iw ]; then
+	IW=/usr/sbin/iw
+elif [ -x /sbin/iw ]; then
+	IW=/sbin/iw
+else
+	IW=
+fi
+
+# ---------------------------------------------------------------------------
 # Color support (auto-disabled when not writing to a terminal)
 # ---------------------------------------------------------------------------
 if [ -t 1 ]; then
@@ -185,8 +201,8 @@ fi
 hdr "Wireless Interface Status"
 # ===========================================================================
 
-if command -v iw >/dev/null 2>&1; then
-	WLAN_DEVS=$(iw dev 2>/dev/null | awk '/Interface/{print $2}')
+if [ -n "${IW}" ]; then
+	WLAN_DEVS=$(${IW} dev 2>/dev/null | awk '/Interface/{print $2}')
 	if [ -z "${WLAN_DEVS}" ]; then
 		warn "No wireless interfaces found"
 	else
@@ -204,7 +220,7 @@ if command -v iw >/dev/null 2>&1; then
 			esac
 
 			# link info
-			LINK=$(iw dev "${iface}" link 2>/dev/null)
+			LINK=$(${IW} dev "${iface}" link 2>/dev/null)
 			case "${LINK}" in
 				*"Not connected"*)
 					warn "  ${iface}: Not connected to any network"
@@ -228,15 +244,15 @@ if command -v iw >/dev/null 2>&1; then
 			esac
 
 			# phy capabilities (band info)
-			PHY=$(iw dev "${iface}" info 2>/dev/null | awk '/wiphy/{print $2}')
+			PHY=$(${IW} dev "${iface}" info 2>/dev/null | awk '/wiphy/{print $2}')
 			if [ -n "${PHY}" ]; then
-				BANDS=$(iw phy "phy${PHY}" info 2>/dev/null | grep -c "Band [0-9]")
+				BANDS=$(${IW} phy "phy${PHY}" info 2>/dev/null | grep -c "Band [0-9]")
 				info "  Bands: ${BANDS} (phy${PHY})"
 			fi
 		done
 	fi
 else
-	warn "iw is not installed -- cannot check wireless interfaces"
+	warn "iw not found -- cannot check wireless interfaces"
 fi
 
 # ===========================================================================
@@ -273,8 +289,8 @@ fi
 hdr "Regulatory Domain"
 # ===========================================================================
 
-if command -v iw >/dev/null 2>&1; then
-	REG=$(iw reg get 2>/dev/null | grep -m1 "country")
+if [ -n "${IW}" ]; then
+	REG=$(${IW} reg get 2>/dev/null | grep -m1 "country")
 	if [ -n "${REG}" ]; then
 		info "${REG}"
 	else
