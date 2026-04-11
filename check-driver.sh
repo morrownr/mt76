@@ -210,7 +210,7 @@ if [ -n "${IW}" ]; then
 			# figure out which driver owns this interface
 			DRV=$(readlink "/sys/class/net/${iface}/device/driver" 2>/dev/null | awk -F/ '{print $NF}')
 			case "${DRV}" in
-				*mt7603*|*mt7615*|*mt7915*|*mt7996*|*mt76*)
+				*mt7603*|*mt7615*|*mt7915*|*mt7921*|*mt7922*|*mt7925*|*mt7996*|*mt76*)
 					printf '\n  %s%s%s (driver: %s)\n' "${BOLD}" "${iface}" "${NC}" "${DRV}"
 					;;
 				*)
