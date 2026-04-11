@@ -323,27 +323,34 @@ fi
 hdr "Recent Kernel Messages (mt76)"
 # ===========================================================================
 
-# dmesg may require root on some systems
-DMESG_OUT=$(dmesg 2>/dev/null | grep -iE "mt76|mt79|mt7603|mt7615|mt7915|mt7921|mt7925|mt7996|mediatek" | tail -25)
-if [ -n "${DMESG_OUT}" ]; then
-	# highlight errors and warnings
-	echo "${DMESG_OUT}" | while IFS= read -r line; do
-		case "${line}" in
-			*error*|*ERROR*|*fail*|*FAIL*|*firmware*not*found*)
-				fail "  ${line}"
-				;;
-			*warn*|*WARN*)
-				warn "  ${line}"
-				;;
-			*)
-				info "  ${line}"
-				;;
-		esac
-	done
+# dmesg may be restricted to root on some kernels (Debian, Ubuntu, and any
+# system with kernel.dmesg_restrict=1). Detect that up front so we can emit a
+# clean, honest message instead of a false "no messages found" result.
+DMESG_RESTRICT=0
+if [ -r /proc/sys/kernel/dmesg_restrict ]; then
+	DMESG_RESTRICT=$(cat /proc/sys/kernel/dmesg_restrict 2>/dev/null || echo 0)
+fi
+
+if [ "$(id -u)" -ne 0 ] && [ "${DMESG_RESTRICT}" = "1" ]; then
+	info "dmesg is restricted on this kernel (kernel.dmesg_restrict=1)"
+	info "for kernel messages, re-run as root: sudo ./check-driver.sh"
 else
-	DMESG_ERR=$(dmesg 2>&1 >/dev/null)
-	if [ -n "${DMESG_ERR}" ]; then
-		info "Cannot read dmesg (try: sudo dmesg | grep mt76)"
+	DMESG_OUT=$(dmesg 2>/dev/null | grep -iE "mt76|mt79|mt7603|mt7615|mt7915|mt7921|mt7922|mt7925|mt7996|mediatek" | tail -25)
+	if [ -n "${DMESG_OUT}" ]; then
+		# highlight errors and warnings
+		echo "${DMESG_OUT}" | while IFS= read -r line; do
+			case "${line}" in
+				*error*|*ERROR*|*fail*|*FAIL*|*firmware*not*found*)
+					fail "  ${line}"
+					;;
+				*warn*|*WARN*)
+					warn "  ${line}"
+					;;
+				*)
+					info "  ${line}"
+					;;
+			esac
+		done
 	else
 		info "No mt76-related kernel messages found"
 	fi
