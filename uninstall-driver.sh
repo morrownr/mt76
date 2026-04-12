@@ -94,6 +94,16 @@ do
 	shift
 done
 
+# If stdin is not a terminal, treat this run as implicitly non-interactive
+# even without the NoPrompt flag. Otherwise a blind `read -r` at the
+# trailing reboot prompt blocks on an inherited-but-empty parent stdin
+# (seen when the script is run via cron, cloud-init, qemu-guest-agent, or
+# similar) and the uninstall appears to hang at the reboot prompt instead
+# of finishing cleanly.
+if [ ! -t 0 ]; then
+	NO_PROMPT=1
+fi
+
 # ===========================================================================
 # Banner
 # ===========================================================================
