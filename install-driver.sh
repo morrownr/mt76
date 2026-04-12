@@ -486,11 +486,16 @@ else
 	[ "$RESULT" != "0" ] && die_error "$RESULT"
 fi
 
-# count installed modules
-MOD_COUNT=$(find "${MODDESTDIR}" -name "*_git.ko*" 2>/dev/null | wc -l)
-if [ "${MOD_COUNT}" -eq 0 ] && command -v dkms >/dev/null 2>&1; then
-	MOD_COUNT=$(find /lib/modules/"${KVER}"/updates -name "*_git.ko*" 2>/dev/null | wc -l)
-fi
+# Count installed modules. We previously hard-coded MODDESTDIR
+# (/extra/mt76) and a DKMS-specific /updates fallback, but the real
+# install location varies by distro and by build mode:
+#   - Alpine non-dkms:        /lib/modules/KVER/extra/mt76/*_git.ko.gz
+#   - Arch dkms:              /lib/modules/KVER/updates/dkms/*_git.ko.zst
+#   - Fedora dkms:            /lib/modules/KVER/extra/*_git.ko.xz   (flat)
+#   - Debian dkms:            /lib/modules/KVER/updates/dkms/*_git.ko.xz
+# The safest answer is to search the whole kernel modules tree for any
+# *_git.ko* files, which catches every layout every distro uses.
+MOD_COUNT=$(find "/lib/modules/${KVER}" -name "*_git.ko*" 2>/dev/null | wc -l)
 printf '%s  Installed %s module(s) for kernel %s.%s\n' "${GREEN}" "${MOD_COUNT}" "${KVER}" "${NC}"
 
 
