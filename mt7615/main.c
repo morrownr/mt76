@@ -12,6 +12,12 @@
 #include "mt7615.h"
 #include "mcu.h"
 
+/* timer_container_of was renamed from from_timer in kernel 6.16. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)
+#define timer_container_of(var, callback_timer, timer_fieldname) \
+    from_timer(var, callback_timer, timer_fieldname)
+#endif
+
 static bool mt7615_dev_running(struct mt7615_dev *dev)
 {
 	struct mt7615_phy *phy;

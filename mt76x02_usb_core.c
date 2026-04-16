@@ -264,11 +264,11 @@ void mt76x02u_init_beacon_config(struct mt76x02_dev *dev)
 	};
 	dev->beacon_ops = &beacon_ops;
 
-	/* hrtimer_setup() replaced hrtimer_init() + .function assignment in 6.12.
+	/* hrtimer_setup() replaced hrtimer_init() + .function assignment in 6.13.
 	 * Version check used because there is no header-level way to detect this.
 	 * Some stable trees may backport hrtimer_setup() -- if a distro kernel
-	 * older than 6.12 fails here, bump the version check down accordingly. */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,12,0)
+	 * older than 6.13 fails here, bump the version check down accordingly. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,13,0)
 	hrtimer_setup(&dev->pre_tbtt_timer, mt76x02u_pre_tbtt_interrupt,
 		      CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 #else

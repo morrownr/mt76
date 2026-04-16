@@ -7,6 +7,12 @@
 #include "mt792x.h"
 #include "dma.h"
 
+/* timer_container_of was renamed from from_timer in kernel 6.16. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)
+#define timer_container_of(var, callback_timer, timer_fieldname) \
+    from_timer(var, callback_timer, timer_fieldname)
+#endif
+
 static const struct ieee80211_iface_limit if_limits[] = {
 	{
 		.max = MT792x_MAX_INTERFACES,
