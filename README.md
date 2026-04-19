@@ -1,7 +1,7 @@
 # mt76 Out-of-Tree WiFi Driver Build Infrastructure
 
 Build, install, and manage MediaTek mt76 WiFi drivers as out-of-tree kernel
-modules. Supports DKMS, non-DKMS, Secure Boot, and kernels 6.17 through 7.x.
+modules. Supports DKMS, non-DKMS, Secure Boot, and kernels 6.12 through 7.x.
 
 Based on [openwrt/mt76](https://github.com/openwrt/mt76), adapted for
 standalone out-of-tree building by the
@@ -137,7 +137,7 @@ sudo sh uninstall-driver.sh
 | `check-driver.sh` | No-root diagnostic: loaded modules, hardware, link status, firmware, dmesg |
 | `dkms.conf` | DKMS auto-rebuild on kernel updates, conditional PCI/SDIO support |
 | `mt76_git.conf` | modprobe options and blacklist for the in-kernel mt76 modules this repo replaces |
-| `compat-patches/` | Source compatibility patches for kernels 6.17 through 6.19+ |
+| `compat-patches/` | Source compatibility patches for older kernel API changes |
 | `mt7615/Makefile` | MT7615 family: common + PCIe + USB + SDIO (WiFi 5) |
 | `mt7915/Makefile` | MT7915 PCIe with coredump support (WiFi 6) |
 | `mt7921/Makefile` | MT7921 family: common + PCIe + USB + SDIO (WiFi 6E) |
@@ -222,7 +222,7 @@ command.
 
 ## Kernel Compatibility
 
-Supported range: **6.17 through 7.x** (enforced by `BUILD_EXCLUSIVE_KERNEL`
+Supported range: **6.12 through 7.x** (enforced by `BUILD_EXCLUSIVE_KERNEL`
 in `dkms.conf`).
 
 Compatibility patches in `compat-patches/`:
