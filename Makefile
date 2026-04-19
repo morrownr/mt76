@@ -81,16 +81,18 @@ CFLAGS_mt76x02_trace.o := -I$(src)
 CFLAGS_mt792x_trace.o := -I$(src)
 
 # --- Chipset families (subdirectories) ---
-# MT7603 (WiFi 4) is not built by default. The chip is old, no users have
-# reported running it on this out-of-tree driver, and no firmware is shipped
-# for it in this repo. The source tree is retained so someone with an MT7603
-# adapter can reactivate it by uncommenting the line below.
+# MT7603 (WiFi 4), MT7915/MT7916 (WiFi 6 PCIe/SoC), and MT7996 (WiFi 7 PCIe)
+# are not built by default. No firmware is shipped for these chips in this
+# repo (see info/MARKET-FOOTPRINT.md and firmware/README.md), so users of
+# this out-of-tree driver do not need them compiled. The source trees are
+# retained so anyone with matching hardware can reactivate by uncommenting
+# the matching line below.
 #obj-m += mt7603/
 obj-m += mt7615/
-obj-m += mt7915/
+#obj-m += mt7915/
 obj-m += mt7921/
 obj-m += mt7925/
-obj-m += mt7996/
+#obj-m += mt7996/
 obj-m += mt76x0/
 obj-m += mt76x2/
 
