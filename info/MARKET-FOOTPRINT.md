@@ -82,8 +82,8 @@ Confirmed non-MediaTek: Lenovo ThinkStation P3 Tower/Tiny/Ultra + P5 + P7 + P8 (
 
 | Chip | Mainline kernel | Ubuntu 24.04 LTS (6.8/6.14 HWE) | Debian 13 trixie (6.12) | Debian 12 (6.1) | Fedora 42 (6.14) | Fedora 43 (6.17) | RHEL 10.1 (6.12) | RHEL 9 (5.14) | openSUSE Leap 16 (6.12) |
 |------|-----------------|-------------------------------|----------------------|-----------------|------------------|------------------|------------------|----------------|-------------------------|
-| MT7921 | 5.18 | yes | yes | yes (via backport) | yes | yes | yes | backport only | yes |
-| MT7922 | 5.17 | yes | yes | yes | yes | yes | yes | backport only | yes |
+| MT7921 | 5.12 | yes | yes | yes | yes | yes | yes | backport only | yes |
+| MT7922 | 5.16 | yes | yes | yes | yes | yes | yes | backport only | yes |
 | MT7925 | 6.7 | HWE only | yes | no | yes | yes | yes | no | yes |
 | MT7920 | 6.10 | HWE only | yes | no | yes | yes | yes | no | yes |
 | MT7902 | in mainline master via nbd tree 2026-03-24; v7.1 release track | not yet (6.14 HWE) | not yet | no | not yet | yes (6.17 reached) | not yet | no | not yet |
