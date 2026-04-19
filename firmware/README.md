@@ -1,11 +1,13 @@
 2026-04-19
 
+Mediatek Firmware Files
+
 The purpose of this document is to show which mt76 firmware files are
 included in this repo and what the filenames are for each of the mt76
 chips.
 
-More information to help understand the order of this document and where 
-updated files can be obtained can be found at the following sites:
+The following links provide information to help understand the order
+of this document and where updated files can be obtained:
 
 [Mediatek Official Linux Website that outlines supported chips](https://wireless.docs.kernel.org/en/latest/en/users/drivers/mediatek.html)
 
@@ -25,7 +27,9 @@ Status: firmware included, driver compiled
 
 Binary firmware for MT7610U WiFi devices
 
+```
 File: mediatek/mt7610u.bin
+```
 
 Available in Linux firmware repository since: 2018-08-14
 
@@ -37,8 +41,10 @@ Status: firmware included, driver compiled
 
 Binary firmware for MT76x2u WiFi devices
 
+```
 File: mediatek/mt7662u.bin
 File: mediatek/mt7662u_rom_patch.bin
+```
 
 Available in Linux firmware repository since: 2018-07-30
 
@@ -56,7 +62,9 @@ Status: firmware included, driver compiled
 
 Binary firmware for MT7610E WiFi devices 
 
+```
 File: mediatek/mt7610e.bin
+```
 
 Available in Linux firmware repository since: 2018-10-18
 
@@ -87,10 +95,12 @@ Status: firmware included, driver compiled
 
 Binary firmware for MT7663 WiFi devices 
 
+```
 File: mediatek/mt7663_n9_v3.bin	
 File: mediatek/mt7663pr2h.bin
 File: mediatek/mt7663_n9_rebb.bin
 File: mediatek/mt7663pr2h_rebb.bin
+```
 
 Available in Linux firmware repository since: 2020-04-13
 
@@ -117,29 +127,37 @@ by the mt7921u/e/s driver but have their own firmware files.
 
 Binary firmware for MT7902 WiFi devices
 
+```
 File: mediatek/WIFI_MT7902_patch_mcu_1_1_hdr.bin
 File: mediatek/WIFI_RAM_CODE_MT7902_1.bin
+```
 
 Available in Linux firmware repository since: 2026-02-21
 
 Binary firmware for MT7920 WiFi devices
 
+```
 File: mediatek/WIFI_MT7961_patch_mcu_1a_2_hdr.bin
 File: mediatek/WIFI_RAM_CODE_MT7961_1a.bin
+```
 
 Available in Linux firmware repository since: 2024-10-01
 
 Binary firmware for MT7921 WiFi devices
 
+```
 File: mediatek/WIFI_MT7961_patch_mcu_1_1_hdr.bin
 File: mediatek/WIFI_RAM_CODE_MT7961_1.bin
+```
 
 Available in Linux firmware repository since: 2021-02-08 
 
 Binary firmware for MT7922 WiFi devices
 
+```
 File: mediatek/WIFI_MT7922_patch_mcu_1_1_hdr.bin
 File: mediatek/WIFI_RAM_CODE_MT7922_1.bin
+```
 
 Available in Linux firmware repository since: 2021-08-12 
 
@@ -155,8 +173,10 @@ MT7925 802.11a/b/g/n/ac/ax/be 2T2R 2.4/5G/6GHz PCIe/USB Chip (6.7+)
 
 Binary firmware for MT7925 WiFi devices
 
+```
 File: mediatek/mt7925/WIFI_MT7925_PATCH_MCU_1_1_hdr.bin
 File: mediatek/mt7925/WIFI_RAM_CODE_MT7925_1_1.binBB
+```
 
 Available in Linux firmware repository since: 2024-01-02
 
