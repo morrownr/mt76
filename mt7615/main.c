@@ -426,7 +426,12 @@ static int mt7615_set_sar_specs(struct ieee80211_hw *hw,
 	return mt76_update_channel(phy->mt76);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int mt7615_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
+#else
+static int mt7615_config(struct ieee80211_hw *hw, u32 changed)
+#endif
 {
 	struct mt7615_dev *dev = mt7615_hw_dev(hw);
 	struct mt7615_phy *phy = mt7615_hw_phy(hw);
@@ -791,8 +796,13 @@ static void mt7615_tx(struct ieee80211_hw *hw,
 	mt76_connac_pm_queue_skb(hw, &dev->pm, wcid, skb);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int mt7615_set_rts_threshold(struct ieee80211_hw *hw, int radio_idx,
 				    u32 val)
+#else
+static int mt7615_set_rts_threshold(struct ieee80211_hw *hw, u32 val)
+#endif
 {
 	struct mt7615_dev *dev = mt7615_hw_dev(hw);
 	struct mt7615_phy *phy = mt7615_hw_phy(hw);
@@ -979,9 +989,15 @@ mt7615_offset_tsf(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	mt7615_mutex_release(dev);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static void
 mt7615_set_coverage_class(struct ieee80211_hw *hw, int radio_idx,
 			  s16 coverage_class)
+#else
+static void
+mt7615_set_coverage_class(struct ieee80211_hw *hw, s16 coverage_class)
+#endif
 {
 	struct mt7615_phy *phy = mt7615_hw_phy(hw);
 	struct mt7615_dev *dev = phy->dev;
@@ -992,9 +1008,15 @@ mt7615_set_coverage_class(struct ieee80211_hw *hw, int radio_idx,
 	mt7615_mutex_release(dev);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int
 mt7615_set_antenna(struct ieee80211_hw *hw, int radio_idx,
 		   u32 tx_ant, u32 rx_ant)
+#else
+static int
+mt7615_set_antenna(struct ieee80211_hw *hw, u32 tx_ant, u32 rx_ant)
+#endif
 {
 	struct mt7615_dev *dev = mt7615_hw_dev(hw);
 	struct mt7615_phy *phy = mt7615_hw_phy(hw);

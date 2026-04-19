@@ -53,8 +53,14 @@ int mt76x2e_set_channel(struct mt76_phy *phy)
 	return 0;
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int
 mt76x2_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
+#else
+static int
+mt76x2_config(struct ieee80211_hw *hw, u32 changed)
+#endif
 {
 	struct mt76x02_dev *dev = hw->priv;
 
@@ -99,8 +105,14 @@ mt76x2_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 {
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int mt76x2_set_antenna(struct ieee80211_hw *hw, int radio_idx,
 			      u32 tx_ant, u32 rx_ant)
+#else
+static int mt76x2_set_antenna(struct ieee80211_hw *hw,
+			      u32 tx_ant, u32 rx_ant)
+#endif
 {
 	struct mt76x02_dev *dev = hw->priv;
 

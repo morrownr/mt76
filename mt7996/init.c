@@ -536,7 +536,10 @@ mt7996_init_wiphy(struct ieee80211_hw *hw, struct mtk_wed_device *wed)
 	ieee80211_hw_set(hw, HAS_RATE_CONTROL);
 	ieee80211_hw_set(hw, SUPPORTS_TX_ENCAP_OFFLOAD);
 	ieee80211_hw_set(hw, SUPPORTS_RX_DECAP_OFFLOAD);
+	/* compat: IEEE80211_HW_NO_VIRTUAL_MONITOR added to mac80211 in kernel 6.15 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
 	ieee80211_hw_set(hw, NO_VIRTUAL_MONITOR);
+#endif
 	ieee80211_hw_set(hw, SUPPORTS_MULTI_BSSID);
 	ieee80211_hw_set(hw, CHANCTX_STA_CSA);
 

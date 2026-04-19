@@ -547,8 +547,14 @@ void mt76x02_set_tx_ackto(struct mt76x02_dev *dev)
 }
 EXPORT_SYMBOL_GPL(mt76x02_set_tx_ackto);
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 void mt76x02_set_coverage_class(struct ieee80211_hw *hw,
 				int radio_idx, s16 coverage_class)
+#else
+void mt76x02_set_coverage_class(struct ieee80211_hw *hw,
+				s16 coverage_class)
+#endif
 {
 	struct mt76x02_dev *dev = hw->priv;
 
@@ -559,7 +565,12 @@ void mt76x02_set_coverage_class(struct ieee80211_hw *hw,
 }
 EXPORT_SYMBOL_GPL(mt76x02_set_coverage_class);
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 int mt76x02_set_rts_threshold(struct ieee80211_hw *hw, int radio_idx, u32 val)
+#else
+int mt76x02_set_rts_threshold(struct ieee80211_hw *hw, u32 val)
+#endif
 {
 	struct mt76x02_dev *dev = hw->priv;
 
