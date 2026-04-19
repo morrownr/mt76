@@ -13,7 +13,7 @@ of this document and where updated files can be obtained:
 
 [Mediatek Official Linux firmware repository](https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/mediatek)
 
-Information regarding the mt76 [MARKET-FOOTPRINT](https://github.com/morrownr/mt76/blob/main/info/MARKET-FOOTPRINT.md0)
+Information regarding the mt76 [MARKET-FOOTPRINT](https://github.com/morrownr/mt76/blob/main/info/MARKET-FOOTPRINT.md)
 
 Note: I use linux-wireless for notifications of new firmware files. The
 log at the above Mediatek Official Linux firmware repository link can
@@ -118,7 +118,7 @@ Status: no firmware, not compiled
 
 -----
 
-MT7921 802.11a/b/g/n/ac/ax 2T2R 2.4/5GHz/6Hz PCIe/USB/SDIO Chip
+MT7921 802.11a/b/g/n/ac/ax 2T2R 2.4/5/6GHz PCIe/USB/SDIO Chip
 
 Status: firmware included, drivers compiled
 
@@ -171,11 +171,13 @@ Status: no firmware, not compiled
 
 MT7925 802.11a/b/g/n/ac/ax/be 2T2R 2.4/5G/6GHz PCIe/USB Chip (6.7+)
 
+Status: firmware included, driver compiled
+
 Binary firmware for MT7925 WiFi devices
 
 ```
 File: mediatek/mt7925/WIFI_MT7925_PATCH_MCU_1_1_hdr.bin
-File: mediatek/mt7925/WIFI_RAM_CODE_MT7925_1_1.binBB
+File: mediatek/mt7925/WIFI_RAM_CODE_MT7925_1_1.bin
 ```
 
 Available in Linux firmware repository since: 2024-01-02
