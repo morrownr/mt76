@@ -630,7 +630,12 @@ void mt7921_set_runtime_pm(struct mt792x_dev *dev)
 	mt76_connac_mcu_set_deep_sleep(&dev->mt76, pm->ds_enable);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int mt7921_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
+#else
+static int mt7921_config(struct ieee80211_hw *hw, u32 changed)
+#endif
 {
 	struct mt792x_dev *dev = mt792x_hw_dev(hw);
 	struct mt792x_phy *phy = mt792x_hw_phy(hw);
@@ -920,8 +925,13 @@ void mt7921_mac_sta_remove(struct mt76_dev *mdev, struct ieee80211_vif *vif,
 }
 EXPORT_SYMBOL_GPL(mt7921_mac_sta_remove);
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int mt7921_set_rts_threshold(struct ieee80211_hw *hw, int radio_idx,
 				    u32 val)
+#else
+static int mt7921_set_rts_threshold(struct ieee80211_hw *hw, u32 val)
+#endif
 {
 	struct mt792x_dev *dev = mt792x_hw_dev(hw);
 
@@ -1101,9 +1111,15 @@ mt7921_stop_sched_scan(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
 	return err;
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int
 mt7921_set_antenna(struct ieee80211_hw *hw, int radio_idx,
 		   u32 tx_ant, u32 rx_ant)
+#else
+static int
+mt7921_set_antenna(struct ieee80211_hw *hw, u32 tx_ant, u32 rx_ant)
+#endif
 {
 	struct mt792x_dev *dev = mt792x_hw_dev(hw);
 	struct mt792x_phy *phy = mt792x_hw_phy(hw);

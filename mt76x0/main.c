@@ -57,7 +57,12 @@ out:
 }
 EXPORT_SYMBOL_GPL(mt76x0_set_sar_specs);
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 int mt76x0_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
+#else
+int mt76x0_config(struct ieee80211_hw *hw, u32 changed)
+#endif
 {
 	struct mt76x02_dev *dev = hw->priv;
 

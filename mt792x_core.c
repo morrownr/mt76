@@ -607,8 +607,13 @@ void mt792x_sta_statistics(struct ieee80211_hw *hw,
 }
 EXPORT_SYMBOL_GPL(mt792x_sta_statistics);
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 void mt792x_set_coverage_class(struct ieee80211_hw *hw, int radio_idx,
 			       s16 coverage_class)
+#else
+void mt792x_set_coverage_class(struct ieee80211_hw *hw, s16 coverage_class)
+#endif
 {
 	struct mt792x_phy *phy = mt792x_hw_phy(hw);
 	struct mt792x_dev *dev = phy->dev;

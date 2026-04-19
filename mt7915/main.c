@@ -449,8 +449,13 @@ out:
 	return err;
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int mt7915_config(struct ieee80211_hw *hw, int radio_idx,
 			 u32 changed)
+#else
+static int mt7915_config(struct ieee80211_hw *hw, u32 changed)
+#endif
 {
 	struct mt7915_dev *dev = mt7915_hw_dev(hw);
 	struct mt7915_phy *phy = mt7915_hw_phy(hw);
@@ -917,8 +922,13 @@ static void mt7915_tx(struct ieee80211_hw *hw,
 	mt76_tx(mphy, control->sta, wcid, skb);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int mt7915_set_rts_threshold(struct ieee80211_hw *hw, int radio_idx,
 				    u32 val)
+#else
+static int mt7915_set_rts_threshold(struct ieee80211_hw *hw, u32 val)
+#endif
 {
 	struct mt7915_dev *dev = mt7915_hw_dev(hw);
 	struct mt7915_phy *phy = mt7915_hw_phy(hw);
@@ -1113,9 +1123,15 @@ mt7915_offset_tsf(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	mutex_unlock(&dev->mt76.mutex);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static void
 mt7915_set_coverage_class(struct ieee80211_hw *hw, int radio_idx,
 			  s16 coverage_class)
+#else
+static void
+mt7915_set_coverage_class(struct ieee80211_hw *hw, s16 coverage_class)
+#endif
 {
 	struct mt7915_phy *phy = mt7915_hw_phy(hw);
 	struct mt7915_dev *dev = phy->dev;
@@ -1126,8 +1142,14 @@ mt7915_set_coverage_class(struct ieee80211_hw *hw, int radio_idx,
 	mutex_unlock(&dev->mt76.mutex);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int
 mt7915_set_antenna(struct ieee80211_hw *hw, int radio_idx, u32 tx_ant, u32 rx_ant)
+#else
+static int
+mt7915_set_antenna(struct ieee80211_hw *hw, u32 tx_ant, u32 rx_ant)
+#endif
 {
 	struct mt7915_dev *dev = mt7915_hw_dev(hw);
 	struct mt7915_phy *phy = mt7915_hw_phy(hw);
@@ -1235,12 +1257,21 @@ static void mt7915_sta_rc_work(void *data, struct ieee80211_sta *sta)
 	spin_unlock_bh(&dev->mt76.sta_poll_lock);
 }
 
+/* compat: sta_rc_update renamed to link_sta_rc_update with link_sta arg in kernel 6.13 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 static void mt7915_sta_rc_update(struct ieee80211_hw *hw,
 				 struct ieee80211_vif *vif,
 				 struct ieee80211_link_sta *link_sta,
 				 u32 changed)
 {
 	struct ieee80211_sta *sta = link_sta->sta;
+#else
+static void mt7915_sta_rc_update(struct ieee80211_hw *hw,
+				 struct ieee80211_vif *vif,
+				 struct ieee80211_sta *sta,
+				 u32 changed)
+{
+#endif
 	struct mt7915_phy *phy = mt7915_hw_phy(hw);
 	struct mt7915_dev *dev = phy->dev;
 	struct mt7915_sta *msta = (struct mt7915_sta *)sta->drv_priv;
@@ -1704,8 +1735,14 @@ mt7915_twt_teardown_request(struct ieee80211_hw *hw,
 	mutex_unlock(&dev->mt76.mutex);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int
 mt7915_set_frag_threshold(struct ieee80211_hw *hw, int radio_idx, u32 val)
+#else
+static int
+mt7915_set_frag_threshold(struct ieee80211_hw *hw, u32 val)
+#endif
 {
 	return 0;
 }
@@ -1825,7 +1862,12 @@ const struct ieee80211_ops mt7915_ops = {
 	.stop_ap = mt7915_stop_ap,
 	.sta_state = mt76_sta_state,
 	.sta_pre_rcu_remove = mt76_sta_pre_rcu_remove,
+	/* compat: sta_rc_update renamed to link_sta_rc_update in kernel 6.13 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	.link_sta_rc_update = mt7915_sta_rc_update,
+#else
+	.sta_rc_update = mt7915_sta_rc_update,
+#endif
 	.set_key = mt7915_set_key,
 	.ampdu_action = mt7915_ampdu_action,
 	.set_rts_threshold = mt7915_set_rts_threshold,

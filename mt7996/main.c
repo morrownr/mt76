@@ -7,6 +7,13 @@
 #include "mcu.h"
 #include "mac.h"
 
+/* compat: struct wireless_dev gained radio_mask in kernel 6.13; pre-6.13 is single-radio */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+#define MT76_WDEV_RADIO_MASK(wdev) ((wdev)->radio_mask)
+#else
+#define MT76_WDEV_RADIO_MASK(wdev) ((void)(wdev), BIT(0))
+#endif
+
 int mt7996_run(struct mt7996_phy *phy)
 {
 	struct mt7996_dev *dev = phy->dev;
@@ -557,7 +564,7 @@ static int mt7996_add_interface(struct ieee80211_hw *hw,
 	for (i = 0; i < MT7996_MAX_RADIOS; i++) {
 		struct mt7996_phy *phy = dev->radio_phy[i];
 
-		if (!phy || !(wdev->radio_mask & BIT(i)) ||
+		if (!phy || !(MT76_WDEV_RADIO_MASK(wdev) & BIT(i)) ||
 		    test_bit(MT76_STATE_RUNNING, &phy->mt76->state))
 			continue;
 
@@ -590,9 +597,9 @@ static void mt7996_remove_iter(void *data, u8 *mac, struct ieee80211_vif *vif)
 	struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
 	struct mt7996_radio_data *rdata = data;
 
-	rdata->active_mask |= wdev->radio_mask;
+	rdata->active_mask |= MT76_WDEV_RADIO_MASK(wdev);
 	if (vif->type == NL80211_IFTYPE_MONITOR)
-		rdata->monitor_mask |= wdev->radio_mask;
+		rdata->monitor_mask |= MT76_WDEV_RADIO_MASK(wdev);
 }
 
 static void mt7996_remove_interface(struct ieee80211_hw *hw,
@@ -734,7 +741,12 @@ static int mt7996_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
 	return err;
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int mt7996_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
+#else
+static int mt7996_config(struct ieee80211_hw *hw, u32 changed)
+#endif
 {
 	return 0;
 }
@@ -810,9 +822,16 @@ static void mt7996_configure_filter(struct ieee80211_hw *hw,
 	mutex_unlock(&dev->mt76.mutex);
 }
 
+/* compat: get_txpower gained link_id in kernel 6.14 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 static int
 mt7996_get_txpower(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		   unsigned int link_id, int *dbm)
+#else
+static int
+mt7996_get_txpower(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+		   int *dbm)
+#endif
 {
 	struct mt7996_vif *mvif = (struct mt7996_vif *)vif->drv_priv;
 	struct mt7996_phy *phy = mt7996_vif_link_phy(&mvif->deflink);
@@ -823,7 +842,7 @@ mt7996_get_txpower(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	if (!phy) {
 		wdev = ieee80211_vif_to_wdev(vif);
 		for (i = 0; i < hw->wiphy->n_radio; i++)
-			if (wdev->radio_mask & BIT(i))
+			if (MT76_WDEV_RADIO_MASK(wdev) & BIT(i))
 				phy = dev->radio_phy[i];
 
 		if (!phy)
@@ -1580,8 +1599,13 @@ unlock:
 	rcu_read_unlock();
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int mt7996_set_rts_threshold(struct ieee80211_hw *hw, int radio_idx,
 				    u32 val)
+#else
+static int mt7996_set_rts_threshold(struct ieee80211_hw *hw, u32 val)
+#endif
 {
 	struct mt7996_dev *dev = mt7996_hw_dev(hw);
 	int i, ret = 0;
@@ -1800,9 +1824,15 @@ unlock:
 	mutex_unlock(&dev->mt76.mutex);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static void
 mt7996_set_coverage_class(struct ieee80211_hw *hw, int radio_idx,
 			  s16 coverage_class)
+#else
+static void
+mt7996_set_coverage_class(struct ieee80211_hw *hw, s16 coverage_class)
+#endif
 {
 	struct mt7996_dev *dev = mt7996_hw_dev(hw);
 	struct mt7996_phy *phy;
@@ -1815,9 +1845,15 @@ mt7996_set_coverage_class(struct ieee80211_hw *hw, int radio_idx,
 	mutex_unlock(&dev->mt76.mutex);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int
 mt7996_set_antenna(struct ieee80211_hw *hw, int radio_idx,
 		   u32 tx_ant, u32 rx_ant)
+#else
+static int
+mt7996_set_antenna(struct ieee80211_hw *hw, u32 tx_ant, u32 rx_ant)
+#endif
 {
 	struct mt7996_dev *dev = mt7996_hw_dev(hw);
 	int i;
@@ -1931,18 +1967,29 @@ static void mt7996_link_rate_ctrl_update(void *data,
 	spin_unlock_bh(&dev->mt76.sta_poll_lock);
 }
 
+/* compat: sta_rc_update renamed to link_sta_rc_update with link_sta arg in kernel 6.13 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 static void mt7996_link_sta_rc_update(struct ieee80211_hw *hw,
 				      struct ieee80211_vif *vif,
 				      struct ieee80211_link_sta *link_sta,
 				      u32 changed)
 {
 	struct ieee80211_sta *sta = link_sta->sta;
+	u8 link_id = link_sta->link_id;
+#else
+static void mt7996_link_sta_rc_update(struct ieee80211_hw *hw,
+				      struct ieee80211_vif *vif,
+				      struct ieee80211_sta *sta,
+				      u32 changed)
+{
+	u8 link_id = 0;  /* pre-6.13 kernels have no MLO: single link */
+#endif
 	struct mt7996_sta *msta = (struct mt7996_sta *)sta->drv_priv;
 	struct mt7996_sta_link *msta_link;
 
 	rcu_read_lock();
 
-	msta_link = mt7996_sta_link(msta, link_sta->link_id);
+	msta_link = mt7996_sta_link(msta, link_id);
 	if (msta_link) {
 		struct mt7996_dev *dev = mt7996_hw_dev(hw);
 
@@ -2521,7 +2568,12 @@ const struct ieee80211_ops mt7996_ops = {
 	.link_info_changed = mt7996_link_info_changed,
 	.sta_state = mt7996_sta_state,
 	.sta_pre_rcu_remove = mt76_sta_pre_rcu_remove,
+	/* compat: sta_rc_update renamed to link_sta_rc_update in kernel 6.13 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	.link_sta_rc_update = mt7996_link_sta_rc_update,
+#else
+	.sta_rc_update = mt7996_link_sta_rc_update,
+#endif
 	.set_key = mt7996_set_key,
 	.ampdu_action = mt7996_ampdu_action,
 	.set_rts_threshold = mt7996_set_rts_threshold,

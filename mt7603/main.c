@@ -215,8 +215,14 @@ static int mt7603_set_sar_specs(struct ieee80211_hw *hw,
 	return mt76_update_channel(mphy);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int
 mt7603_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
+#else
+static int
+mt7603_config(struct ieee80211_hw *hw, u32 changed)
+#endif
 {
 	struct mt7603_dev *dev = hw->priv;
 	int ret = 0;
@@ -656,9 +662,15 @@ mt7603_sta_rate_tbl_update(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	spin_unlock_bh(&dev->mt76.lock);
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static void
 mt7603_set_coverage_class(struct ieee80211_hw *hw, int radio_idx,
 			  s16 coverage_class)
+#else
+static void
+mt7603_set_coverage_class(struct ieee80211_hw *hw, s16 coverage_class)
+#endif
 {
 	struct mt7603_dev *dev = hw->priv;
 

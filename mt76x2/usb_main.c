@@ -49,8 +49,14 @@ int mt76x2u_set_channel(struct mt76_phy *mphy)
 	return err;
 }
 
+/* compat: radio_idx added to ieee80211_ops in kernel 6.17 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int
 mt76x2u_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
+#else
+static int
+mt76x2u_config(struct ieee80211_hw *hw, u32 changed)
+#endif
 {
 	struct mt76x02_dev *dev = hw->priv;
 	int err = 0;
