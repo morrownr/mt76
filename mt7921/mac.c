@@ -568,7 +568,14 @@ bool mt7921_rx_check(struct mt76_dev *mdev, void *data, int len)
 
 	switch (type) {
 	case PKT_TYPE_TXRX_NOTIFY:
-		/* PKT_TYPE_TXRX_NOTIFY can be received only by mmio devices */
+		/* PKT_TYPE_TXRX_NOTIFY is an mmio-only path. On USB/SDIO the
+		 * tx queue ops may be mid-teardown; calling through them can
+		 * land on a NULL function pointer. Drop silently.
+		 */
+		if (mt76_is_usb(mdev) || mt76_is_sdio(mdev)) {
+			dev_warn_once(mdev->dev, "spurious TXRX_NOTIFY on non-mmio bus\n");
+			return false;
+		}
 		mt7921_mac_tx_free(dev, data, len); /* mmio */
 		return false;
 	case PKT_TYPE_TXS:
@@ -598,7 +605,15 @@ void mt7921_queue_rx_skb(struct mt76_dev *mdev, enum mt76_rxq_id q,
 
 	switch (type) {
 	case PKT_TYPE_TXRX_NOTIFY:
-		/* PKT_TYPE_TXRX_NOTIFY can be received only by mmio devices */
+		/* PKT_TYPE_TXRX_NOTIFY is an mmio-only path. On USB/SDIO the
+		 * tx queue ops may be mid-teardown; calling through them can
+		 * land on a NULL function pointer. Drop silently.
+		 */
+		if (mt76_is_usb(mdev) || mt76_is_sdio(mdev)) {
+			dev_warn_once(mdev->dev, "spurious TXRX_NOTIFY on non-mmio bus\n");
+			napi_consume_skb(skb, 1);
+			break;
+		}
 		mt7921_mac_tx_free(dev, skb->data, skb->len);
 		napi_consume_skb(skb, 1);
 		break;
