@@ -79,7 +79,17 @@ Status: no firmware, not compiled
 
 MT7615 802.11a/b/g/n/ac 4T4R 2.4/5GHz PCIe Chip (5.2+)
 
-Status: no firmware, not compiled
+Status: firmware included, driver compiled
+
+Binary firmware for MT7615E WiFi devices
+
+```
+File: mediatek/mt7615_cr4.bin
+File: mediatek/mt7615_n9.bin
+File: mediatek/mt7615_rom_patch.bin
+```
+
+Available in Linux firmware repository since: 2019-04-02
 
 -----
 
