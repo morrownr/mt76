@@ -80,17 +80,17 @@ Confirmed non-MediaTek: Lenovo ThinkStation P3 Tower/Tiny/Ultra + P5 + P7 + P8 (
 
 ### Distro LTS kernel landing matrix (2026-04-17)
 
-| Chip | Mainline kernel | Ubuntu 24.04 LTS (6.8/6.14 HWE) | Debian 13 trixie (6.12) | Debian 12 (6.1) | Fedora 42 (6.14) | Fedora 43 (6.17) | RHEL 10.1 (6.12) | RHEL 9 (5.14) | openSUSE Leap 16 (6.12) |
-|------|-----------------|-------------------------------|----------------------|-----------------|------------------|------------------|------------------|----------------|-------------------------|
-| MT7921 | 5.12 | yes | yes | yes | yes | yes | yes | backport only | yes |
-| MT7922 | 5.16 | yes | yes | yes | yes | yes | yes | backport only | yes |
-| MT7925 | 6.7 | HWE only | yes | no | yes | yes | yes | no | yes |
-| MT7920 | 6.10 | HWE only | yes | no | yes | yes | yes | no | yes |
-| MT7902 | in mainline master via nbd tree 2026-03-24; v7.1 release track | not yet (6.14 HWE) | not yet | no | not yet | yes (6.17 reached) | not yet | no | not yet |
-| MT7927 | not upstream | -- | -- | -- | -- | -- | -- | -- | -- |
-| MT7612/7662, MT7610, MT7663 | 4.x | yes | yes | yes | yes | yes | yes | yes | yes |
+| Chip | Mainline kernel | Ubuntu 24.04 LTS (6.8/6.14 HWE) | Debian 13 trixie (6.12) | Debian 12 (6.1) | Fedora 42 (6.14) | Fedora 43 (6.17) | openSUSE Leap 16 (6.12) |
+|------|-----------------|-------------------------------|----------------------|-----------------|------------------|------------------|-------------------------|
+| MT7921 | 5.12 | yes | yes | yes | yes | yes | yes |
+| MT7922 | 5.16 | yes | yes | yes | yes | yes | yes |
+| MT7925 | 6.7 | HWE only | yes | no | yes | yes | yes |
+| MT7920 | 6.10 | HWE only | yes | no | yes | yes | yes |
+| MT7902 | in mainline master via nbd tree 2026-03-24; v7.1 release track | not yet (6.14 HWE) | not yet | no | not yet | yes (6.17 reached) | not yet |
+| MT7927 | not upstream | -- | -- | -- | -- | -- | -- |
+| MT7612/7662, MT7610, MT7663 | 4.x | yes | yes | yes | yes | yes | yes |
 
-Bottom line: MT7921/MT7922 are universally supported on current-LTS distros. MT7925/MT7920 require Debian 13+, Fedora 41+, RHEL 10, Leap 16, or Ubuntu 24.04 HWE. MT7902 needs kernel 6.17+ (Fedora 43 today, else wait for distro bumps). MT7927 needs distro kernels that don't exist yet.
+Bottom line: MT7921/MT7922 are universally supported on current-LTS distros. MT7925/MT7920 require Debian 13+, Fedora 41+, Leap 16, or Ubuntu 24.04 HWE. MT7902 needs kernel 6.17+ (Fedora 43 today, else wait for distro bumps). MT7927 needs distro kernels that don't exist yet. RHEL is not included in the matrix: Red Hat's selective cherry-pick of driver patches across kernel versions makes "what's supported on RHEL N" unreliable to state in a general table -- a Red Hat user should confirm against their own installed kernel and rpm inventory.
 
 ### Security / CVE summary (19+ confirmed CVEs as of 2026-04-17)
 
