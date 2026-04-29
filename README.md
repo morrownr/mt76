@@ -33,99 +33,42 @@ sudo sh uninstall-driver.sh
 | MT76x0 | MT7610, MT7630, MT7650 | USB, PCIe | mt76x0u, mt76x0e | WiFi 5 (AC) |
 | MT76x2 | MT7612, **MT7662** | USB, PCIe | mt76x2u, mt76x2e | WiFi 5 (AC) |
 | MT7615 | MT7615, MT7663 | PCIe, USB, SDIO | mt7615e, mt7663u, mt7663s | WiFi 5 (AC) |
-| MT7915 | MT7915, MT7906, MT7916 | PCIe | mt7915e | WiFi 6 (AX) |
 | MT7921 | MT7920, MT7921, MT7922, **MT7902** | PCIe, USB, SDIO | mt7921e, mt7921u, mt7921s | WiFi 6E (AXE) |
 | MT7925 | MT7925 | PCIe, USB | mt7925e, mt7925u | WiFi 7 (BE) |
-| MT7996 | MT7990, MT7992, MT7996 | PCIe | mt7996e | WiFi 7 (BE) |
 
 ### Inactive Families
 
 | Family | Status |
 |--------|--------|
 | MT7603 | Source retained but not built by default. Old WiFi 4 chip, no user reports on this repo. Users with MT7603 hardware should rely on the in-kernel `mt7603e` driver. Reactivation is a one-line Makefile change if someone needs it. |
+| MT7915 | Source retained but not built by default. PCIe-only AP/router silicon (MT7915, MT7906, MT7916). Users running this hardware are typically on routers with vendor BSPs; the in-kernel `mt7915e` driver covers desktop/laptop use. |
+| MT7996 | Source retained but not built by default. PCIe-only WiFi 7 AP/router silicon (MT7990, MT7991, MT7992, MT7996). Same router/BSP audience as MT7915; the in-kernel `mt7996e` driver covers desktop/laptop use. |
 
 ## Supported USB Adapters
 
-**MT76x0 (WiFi 5 AC)**
+For specific adapter recommendations, the Plug and Play List, and vendor selection guidance, see [morrownr/USB-WiFi](https://github.com/morrownr/USB-WiFi).
 
-| VID:PID | Device |
-|---------|--------|
-| 148f:7610 | MT7610U reference design |
-| 13b1:003e | Linksys AE6000 |
-| 0e8d:7610 | Sabrent NTWLAC |
-| 7392:a711 | Edimax 7711mac |
-| 7392:b711 | Edimax / Elecom |
-| 148f:761a | TP-Link TL-WDN5200 |
-| 0b05:17d1 | Asus USB-AC51 |
-| 0b05:17db | Asus USB-AC50 |
-| 0df6:0075 | Sitecom WLA-3100 |
-| 2019:ab31 | Planex GW-450D |
-| 2001:3d02 | D-Link DWA-171 rev B1 |
-| 0586:3425 | Zyxel NWD6505 |
-| 07b8:7610 | AboCom AU7212 |
-| 04bb:0951 | I-O DATA WN-AC433UK |
-| 057c:8502 | AVM FRITZ!WLAN AC 430 |
-| 293c:5702 | Comcast Xfinity KXW02AAA |
-| 20f4:806b | TRENDnet TEW-806UBH |
-| 7392:c711 | Devolo WiFi AC Stick |
-| 2357:0123 | TP-Link T2UHP v1 |
-| 2357:0105 | TP-Link Archer T1U |
+The drivers auto-bind to many vendor VID:PIDs per family; run `lsusb` after plugging in to see what was detected. Reference VID:PIDs by chip family:
 
-**MT76x2 (WiFi 5 AC)**
-
-| VID:PID | Device |
-|---------|--------|
-| 0b05:1833 | Asus USB-AC54 |
-| 0b05:17eb | Asus USB-AC55 |
-| 0b05:180b | Asus USB-N53 B1 |
-| 0e8d:7612 | Aukey USBAC1200 / Alfa AWUS036ACM |
-| 057c:8503 | AVM FRITZ!WLAN AC860 |
-| 7392:b711 | Edimax EW-7722UAC |
-| 0e8d:7632 | HC-M7662BU1 |
-| 2c4e:0103 | Mercury UD13 |
-| 0846:9014 | Netgear WNDA3100v3 |
-| 0846:9053 | Netgear A6210 |
-| 045e:02e6 | Xbox One Wireless Adapter |
-| 045e:02fe | Xbox One Wireless Adapter |
-| 0471:2126 | LiteOn WN4516R |
-| 0471:7600 | LiteOn WN4519R |
-| 2357:0137 | TP-Link TL-WDN6200 |
-
-**MT7663 (WiFi 5 AC)**
-
-| VID:PID | Device |
-|---------|--------|
-| 0e8d:7663 | MT7663 reference (USB) |
-| 043e:310c | LG MT7663 (USB) |
-
-**MT7921 (WiFi 6E AXE)**
-
-| VID:PID | Device |
-|---------|--------|
-| 0e8d:7961 | MT7921AU reference |
-| 3574:6211 | D-Link DWA-X1850 |
-| 0846:9060 | Netgear AXE3000 (A8000) |
-| 0846:9065 | Netgear AXE3000 (A8000S) |
-| 35bc:0107 | 8Devices USB-WiFi6E |
-
-**MT7925 (WiFi 7 BE)**
-
-| VID:PID | Device |
-|---------|--------|
-| 0e8d:7925 | MT7925 reference |
-| 0846:9072 | Netgear (WiFi 7) |
+| Family | Reference VID:PID | WiFi Generation |
+|--------|-------------------|-----------------|
+| MT76x0 | 148f:7610 | WiFi 5 (AC) |
+| MT76x2 | 0e8d:7612 | WiFi 5 (AC) |
+| MT7615 / MT7663 | 0e8d:7663 | WiFi 5 (AC) |
+| MT7921 | 0e8d:7961 | WiFi 6E (AXE) |
+| MT7925 | 0e8d:7925 | WiFi 7 (BE) |
 
 ## Supported PCIe Devices
 
-| Family | PCI IDs (vendor 14c3 unless noted) |
-|--------|-----|
+The drivers auto-bind to many vendor PCI IDs per family; run `lspci -nn` and look for MediaTek devices to see what was detected. Reference PCI IDs by chip family (vendor 14c3 unless noted):
+
+| Family | PCI IDs |
+|--------|-------|
 | MT76x0 | 7610, 7630, 7650 |
 | MT76x2 | 7662, 7612, 7602 |
 | MT7615 | 7615, 7663, 7611 |
-| MT7915 | 7915, 7906, 7916, 790a |
 | MT7921 | 7961, 7922, 0608, 0616, 7920, 7902 (also 0b48:7922) |
 | MT7925 | 7925, 0717 |
-| MT7996 | 7990, 7991, 7992, 799a, 7993, 799b |
 
 ## Files
 
