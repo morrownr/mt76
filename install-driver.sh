@@ -65,7 +65,7 @@ else
 fi
 
 # helper: step counter
-TOTAL_STEPS=7
+TOTAL_STEPS=8
 step() {
 	printf '\n%s%s[%s/%s]%s %s%s%s\n' "${BOLD}" "${CYAN}" "$1" "${TOTAL_STEPS}" "${NC}" "${BOLD}" "$2" "${NC}"
 }
@@ -389,19 +389,25 @@ else
 	# top-level .bin files (mt7610, mt7662, mt7902, mt7922, mt7961)
 	for f in "${FW_SRC}"/*.bin; do
 		[ -f "$f" ] || continue
+		base=$(basename "$f")
 		cp -f "$f" "${FW_DEST}/"
+		printf '    %s -> %s/%s\n' "$base" "${FW_DEST}" "$base"
 		FW_COUNT=$((FW_COUNT + 1))
 	done
 
-	# mt7925 subdirectory
-	if [ -d "${FW_SRC}/mt7925" ]; then
-		mkdir -p "${FW_DEST}/mt7925"
-		for f in "${FW_SRC}/mt7925"/*.bin; do
+	# Any chip-specific subdirectory under firmware/ (mt7925, mt7927, future).
+	for subdir in "${FW_SRC}"/*/; do
+		[ -d "$subdir" ] || continue
+		sub=$(basename "$subdir")
+		mkdir -p "${FW_DEST}/${sub}"
+		for f in "${subdir}"*.bin; do
 			[ -f "$f" ] || continue
-			cp -f "$f" "${FW_DEST}/mt7925/"
+			base=$(basename "$f")
+			cp -f "$f" "${FW_DEST}/${sub}/"
+			printf '    %s/%s -> %s/%s/%s\n' "$sub" "$base" "${FW_DEST}" "$sub" "$base"
 			FW_COUNT=$((FW_COUNT + 1))
 		done
-	fi
+	done
 
 	if [ "${FW_COUNT}" -gt 0 ]; then
 		printf '%s  Installed %s firmware file(s) to %s%s\n' "${GREEN}" "${FW_COUNT}" "${FW_DEST}" "${NC}"
@@ -534,6 +540,32 @@ fi
 # unblock wifi
 if command -v rfkill >/dev/null 2>&1; then
 	rfkill unblock wlan
+fi
+
+
+
+# ===== STEP 8: Rebuild initramfs ===========================================
+step 8 "Rebuilding initramfs"
+
+# After installing the _git modules and the modprobe.d blacklist that
+# silences the in-tree mt76 family, the initramfs may still cache the
+# in-tree modules. Regenerate so the boot path picks up the new state
+# rather than reloading the in-tree modules from a stale initramfs.
+if command -v dracut >/dev/null 2>&1; then
+	dracut -f >/dev/null 2>&1 \
+		&& printf '%s  Rebuilt via dracut.%s\n' "${GREEN}" "${NC}" \
+		|| printf '%s  dracut -f failed; rebuild manually before reboot.%s\n' "${YELLOW}" "${NC}"
+elif command -v update-initramfs >/dev/null 2>&1; then
+	update-initramfs -u >/dev/null 2>&1 \
+		&& printf '%s  Rebuilt via update-initramfs.%s\n' "${GREEN}" "${NC}" \
+		|| printf '%s  update-initramfs failed; rebuild manually before reboot.%s\n' "${YELLOW}" "${NC}"
+elif command -v mkinitcpio >/dev/null 2>&1; then
+	mkinitcpio -P >/dev/null 2>&1 \
+		&& printf '%s  Rebuilt via mkinitcpio.%s\n' "${GREEN}" "${NC}" \
+		|| printf '%s  mkinitcpio -P failed; rebuild manually before reboot.%s\n' "${YELLOW}" "${NC}"
+else
+	printf '  %sNo known initramfs tool found (dracut / update-initramfs / mkinitcpio).%s\n' "${YELLOW}" "${NC}"
+	printf '  %sRegenerate manually if your distro uses a different system.%s\n' "${DIM}" "${NC}"
 fi
 
 

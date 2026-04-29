@@ -63,7 +63,7 @@ else
 fi
 
 # helper: step counter
-TOTAL_STEPS=4
+TOTAL_STEPS=5
 step() {
 	printf '\n%s%s[%s/%s]%s %s%s%s\n' "${BOLD}" "${CYAN}" "$1" "${TOTAL_STEPS}" "${NC}" "${BOLD}" "$2" "${NC}"
 }
@@ -187,6 +187,29 @@ step 4 "Rebuilding module database"
 /sbin/depmod -a "${KVER}"
 
 printf '%s  Done.%s\n' "${GREEN}" "${NC}"
+
+
+
+# ===== STEP 5: Rebuild initramfs ===========================================
+step 5 "Rebuilding initramfs"
+
+# Mirror what install-driver.sh does so the initramfs reflects current
+# module state after the OOT modules are removed.
+if command -v dracut >/dev/null 2>&1; then
+	dracut -f >/dev/null 2>&1 \
+		&& printf '%s  Rebuilt via dracut.%s\n' "${GREEN}" "${NC}" \
+		|| printf '%s  dracut -f failed; rebuild manually.%s\n' "${YELLOW}" "${NC}"
+elif command -v update-initramfs >/dev/null 2>&1; then
+	update-initramfs -u >/dev/null 2>&1 \
+		&& printf '%s  Rebuilt via update-initramfs.%s\n' "${GREEN}" "${NC}" \
+		|| printf '%s  update-initramfs failed; rebuild manually.%s\n' "${YELLOW}" "${NC}"
+elif command -v mkinitcpio >/dev/null 2>&1; then
+	mkinitcpio -P >/dev/null 2>&1 \
+		&& printf '%s  Rebuilt via mkinitcpio.%s\n' "${GREEN}" "${NC}" \
+		|| printf '%s  mkinitcpio -P failed; rebuild manually.%s\n' "${YELLOW}" "${NC}"
+else
+	printf '  %sNo known initramfs tool found (dracut / update-initramfs / mkinitcpio).%s\n' "${YELLOW}" "${NC}"
+fi
 
 
 # ===========================================================================
