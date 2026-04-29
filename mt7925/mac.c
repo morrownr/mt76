@@ -667,10 +667,18 @@ mt7925_mac_write_txwi_80211(struct mt76_dev *dev, __le32 *txwi,
 	u8 fc_type, fc_stype;
 	u32 val;
 
+/* compat: see note in mt76_connac_mac.c -- 7.1 mac80211 action API change */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
+	if (ieee80211_is_action(fc) &&
+	    skb->len >= IEEE80211_MIN_ACTION_SIZE(addba_req) &&
+	    mgmt->u.action.category == WLAN_CATEGORY_BACK &&
+	    mgmt->u.action.action_code == WLAN_ACTION_ADDBA_REQ)
+#else
 	if (ieee80211_is_action(fc) &&
 	    skb->len >= IEEE80211_MIN_ACTION_SIZE + 1 &&
 	    mgmt->u.action.category == WLAN_CATEGORY_BACK &&
 	    mgmt->u.action.u.addba_req.action_code == WLAN_ACTION_ADDBA_REQ)
+#endif
 		tid = MT_TX_ADDBA;
 	else if (ieee80211_is_mgmt(hdr->frame_control))
 		tid = MT_TX_NORMAL;
