@@ -192,6 +192,35 @@ if command -v lspci >/dev/null 2>&1; then
 	fi
 fi
 
+# sysfs fallback: scan for USB devices bound to any mt76-family driver.
+# Catches rebadged adapters (e.g. NetGear A9000, 0846:9072) where lsusb
+# shows the rebadger's vendor ID instead of MediaTek's 0e8d, and the
+# vendor-string regex above never sees "mediatek" or "mt76".
+if [ "${FOUND_HW}" -eq 0 ]; then
+	for drv_path in /sys/bus/usb/drivers/mt7*; do
+		[ -d "${drv_path}" ] || continue
+		drv_name=$(basename "${drv_path}")
+		for dev_link in "${drv_path}"/*; do
+			[ -L "${dev_link}" ] || continue
+			dev_base=$(basename "${dev_link}")
+			[ "${dev_base}" = "module" ] && continue
+			# idVendor/idProduct/manufacturer/product live on the USB
+			# device one level up from the interface binding, so read
+			# from "${dev_link}/../" not "${dev_link}/"
+			dev_vid=$(cat "${dev_link}/../idVendor" 2>/dev/null)
+			dev_pid=$(cat "${dev_link}/../idProduct" 2>/dev/null)
+			dev_mfg=$(cat "${dev_link}/../manufacturer" 2>/dev/null)
+			dev_prd=$(cat "${dev_link}/../product" 2>/dev/null)
+			if [ -n "${dev_vid}" ] && [ -n "${dev_pid}" ]; then
+				info "USB: ID ${dev_vid}:${dev_pid} ${dev_mfg} ${dev_prd} (driver: ${drv_name})"
+			else
+				info "USB: ${dev_base} (driver: ${drv_name})"
+			fi
+			FOUND_HW=1
+		done
+	done
+fi
+
 if [ "${FOUND_HW}" -eq 0 ]; then
 	warn "No MediaTek wireless hardware detected"
 	info "If your device is connected, it may not be powered on or recognized"
