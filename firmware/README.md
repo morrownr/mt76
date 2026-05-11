@@ -236,12 +236,14 @@ Status: no firmware, not compiled
 
 MT7927 802.11a/b/g/n/ac/ax/be 2T2R 2.4/5G/6GHz PCIe Chip (7.2+)
 
-Status: firmware not included as of the date of this document,
-  driver not compiled compiled as of the date of this document
+Status: WiFi firmware included (mirrored from upstream submission,
+  pending application by linux-firmware). BT firmware not yet
+  submitted upstream. Driver handled by mt7925e in mainline.
 
-Available in Linux firmware repository since:
+Available in Linux firmware repository since: pending
+  (https://lore.kernel.org/linux-firmware/20260425195810.790773-1-sean.wang@kernel.org/)
 
-Binary firmware for MT7927 WiFi and BT devices
+Binary firmware for MT7927 WiFi devices
 
 ```
 WIFI File: mediatek/mt7927/WIFI_MT6639_PATCH_MCU_2_1_hdr.bin
@@ -249,7 +251,7 @@ WIFI File: mediatek/mt7927/WIFI_RAM_CODE_MT6639_2_1.bin
 ```
 
 ```
-BT File: mediatek/mt7927/
+BT File: (pending separate upstream submission by MediaTek)
 ```
 
 -----
