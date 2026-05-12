@@ -121,18 +121,6 @@ if [ ! -t 0 ]; then
 	NO_PROMPT=1
 fi
 
-# Find an editor for the optional post-install modprobe.conf edit step.
-# Not a hard prerequisite -- if nothing is available we will skip the
-# interactive edit prompt and tell the user to edit the file by hand.
-TEXT_EDITOR=""
-for _ed in "${VISUAL:-}" "${EDITOR:-}" nano vi vim ed; do
-	if [ -n "${_ed}" ] && command -v "${_ed}" >/dev/null 2>&1; then
-		TEXT_EDITOR="${_ed}"
-		break
-	fi
-done
-unset _ed
-
 # ===========================================================================
 # Banner
 # ===========================================================================
@@ -592,26 +580,20 @@ printf "\n"
 printf "  Diagnose problems:\n"
 printf '    %s$ ./check-driver.sh%s\n' "${CYAN}" "${NC}"
 printf "\n"
+printf "  Edit module parameters (optional):\n"
+printf '    %s$ sudo ./edit-parameters.sh%s\n' "${CYAN}" "${NC}"
+printf "\n"
 printf '  %sTip: Update before distro or kernel upgrades.%s\n' "${DIM}" "${NC}"
 printf '  %sTip: Updates can be run as often as you like (recommended: monthly).%s\n' "${DIM}" "${NC}"
 printf '  %s================================================================%s\n' "${BOLD}" "${NC}"
 printf "\n"
 
-# if NoPrompt is not used, ask user some questions
+# if NoPrompt is not used, ask user about rebooting
 if [ $NO_PROMPT -ne 1 ]; then
-	if [ -n "${TEXT_EDITOR}" ]; then
-		printf "Do you want to edit the driver options file now? (recommended) [Y/n] "
-		read -r yn
-		case "$yn" in
-			[nN]) ;;
-			*) "${TEXT_EDITOR}" "/etc/modprobe.d/${OPTIONS_FILE}" ;;
-		esac
-	else
-		printf '  No text editor found on this system. You can edit\n'
-		printf '  /etc/modprobe.d/%s manually whenever you like.\n' "${OPTIONS_FILE}"
-	fi
-
-	printf "Do you want to apply the new options by rebooting now? (recommended) [Y/n] "
+	printf '  Module parameters take effect when the driver is loaded. The\n'
+	printf '  simplest way to apply the new settings is a reboot. (Skipping\n'
+	printf '  this and rebooting later is fine.)\n\n'
+	printf "Do you want to reboot now? (recommended) [Y/n] "
 	read -r yn
 	case "$yn" in
 		[nN]) ;;

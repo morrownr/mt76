@@ -18,6 +18,9 @@ sudo sh install-driver.sh
 # Check status (no root needed)
 ./check-driver.sh
 
+# Edit module parameters (optional)
+sudo ./edit-parameters.sh
+
 # Update
 git pull
 sudo sh install-driver.sh
@@ -78,6 +81,8 @@ The drivers auto-bind to many vendor PCI IDs per family; run `lspci -nn` and loo
 | `install-driver.sh` | Full install with progress display, prerequisite checks, build, verify |
 | `uninstall-driver.sh` | Clean removal of installed modules, DKMS entries, and config |
 | `check-driver.sh` | No-root diagnostic: loaded modules, hardware, link status, firmware, dmesg |
+| `edit-parameters.sh` | Open `/etc/modprobe.d/mt76_git.conf` in `$EDITOR` to tweak module parameters |
+| `default-editor.txt` | Editor used by `edit-parameters.sh` if `$VISUAL` and `$EDITOR` are unset (default: `nano`) |
 | `dkms.conf` | DKMS auto-rebuild on kernel updates, conditional PCI/SDIO support |
 | `mt76_git.conf` | modprobe options and blacklist for the in-kernel mt76 modules this repo replaces |
 | `compat-patches/` | Source compatibility patches for older kernel API changes |
