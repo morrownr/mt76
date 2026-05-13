@@ -124,12 +124,6 @@ fi
 # ===========================================================================
 # Banner
 # ===========================================================================
-if [ $NO_PROMPT -ne 1 ]; then
-	printf '%s%sPlease copy and post all displayed lines when reporting an issue!%s\n' "${BOLD}" "${YELLOW}" "${NC}"
-	printf "Press Enter to continue..."
-	read -r yn
-fi
-
 printf '\n%s' "${BOLD}"
 printf "  ================================================================\n"
 printf "     mt76 WiFi Driver Installer\n"
