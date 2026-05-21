@@ -1,6 +1,6 @@
-2026-04-28
+2026-05-21
 
-Mediatek Firmware Files
+Mediatek Wireless Firmware Files
 
 The purpose of this document is to show which mt76 firmware files are
 included in this repo and what the filenames are for each of the mt76
@@ -15,57 +15,56 @@ of this document and where the files can be obtained:
 
 Information regarding the mt76 [MARKET-FOOTPRINT](https://github.com/morrownr/mt76/blob/main/info/MARKET-FOOTPRINT.md)
 
-Note: I use linux-wireless for notifications of new firmware files. The
-log at the above Mediatek Official Linux firmware repository link can
-also be used.
+Note: The log at the above Mediatek Official Linux firmware repository
+link can used to monitor newly uploaded files.
 
 -----
 
 MT7610U 802.11a/b/g/n/ac 1T1R 2.4/5GHz USB Chip  (4.19+)
 
-Status: firmware included, driver compiled
+Status: firmware included
 
 Available in Linux firmware repository since: 2018-08-14
 
-Binary firmware for MT7610U WiFi devices
+Binary firmware for MT7610U wireless devices
 
 ```
-File: mediatek/mt7610u.bin
+File: lib/firmware/mediatek/mt7610u.bin
 ```
 
 -----
 
 MT7612/MT7602/MT7662 802.11a/b/g/n/ac 2T2R 2.4/5GHz PCIe/USB Chip (4.19+)
 
-Status: firmware included, driver compiled
+Status: firmware included
 
 Available in Linux firmware repository since: 2018-07-30
 
-Binary firmware for MT76x2u WiFi devices
+Binary firmware for MT76x2u wireless devices
 
 ```
-File: mediatek/mt7662u.bin
-File: mediatek/mt7662u_rom_patch.bin
+File: lib/firmware/mediatek/mt7662u.bin
+File: lib/firmware/mediatek/mt7662u_rom_patch.bin
 ```
 
 -----
 
 MT7630E 802.11a/b/g/n 1T1R 2.4/5GHz PCIe Chip
 
-Status: no firmware, not compiled
+Status: firmware not included
 
 -----
 
 MT7610E 802.11a/b/g/n/ac 1T1R 2.4/5GHz PCIe Chip (4.19+)
 
-Status: firmware included, driver compiled
+Status: firmware included
 
 Available in Linux firmware repository since: 2018-10-18
 
-Binary firmware for MT7610E WiFi devices 
+Binary firmware for MT7610E wireless devices 
 
 ```
-File: mediatek/mt7610e.bin
+File: lib/firmware/mediatek/mt7610e.bin
 ```
 
 -----
@@ -73,58 +72,58 @@ File: mediatek/mt7610e.bin
 MT7603E 802.11b/g/n 2T2R 2.4GHz PCIe chip and
 MT7628 802.11b/g/n 2T2R 2.4GHz SoC Device (4.7+)
 
-Status: no firmware, not compiled
+Status: firmware not included
 
 -----
 
 MT7615 802.11a/b/g/n/ac 4T4R 2.4/5GHz PCIe Chip (5.2+)
 
-Status: firmware included, driver compiled
+Status: firmware included
 
 Available in Linux firmware repository since: 2019-04-02
 
-Binary firmware for MT7615E WiFi devices
+Binary firmware for MT7615E wireless devices
 
 ```
-File: mediatek/mt7615_cr4.bin
-File: mediatek/mt7615_n9.bin
-File: mediatek/mt7615_rom_patch.bin
+File: lib/firmware/mediatek/mt7615_cr4.bin
+File: lib/firmware/mediatek/mt7615_n9.bin
+File: lib/firmware/mediatek/mt7615_rom_patch.bin
 ```
 
 -----
 
 MT7622 802.11b/g/n 4T4R 2.4GHz SoC Device (5.7+)
 
-Status: no firmware, not compiled
+Status: firmware not included
 
 -----
 
 MT7663 802.11a/b/g/n/ac 2T2R 2.4/5GHz PCIe/USB/SDIO Chip (5.8+)
 
-Status: firmware included, driver compiled
+Status: firmware included
 
 Available in Linux firmware repository since: 2020-04-13
 
-Binary firmware for MT7663 WiFi devices 
+Binary firmware for MT7663 wireless devices 
 
 ```
-File: mediatek/mt7663_n9_v3.bin	
-File: mediatek/mt7663pr2h.bin
-File: mediatek/mt7663_n9_rebb.bin
-File: mediatek/mt7663pr2h_rebb.bin
+File: lib/firmware/mediatek/mt7663_n9_v3.bin	
+File: lib/firmware/mediatek/mt7663pr2h.bin
+File: lib/firmware/mediatek/mt7663_n9_rebb.bin
+File: lib/firmware/mediatek/mt7663pr2h_rebb.bin
 ```
 
 -----
 
 MT7915/MT7916 802.11a/b/g/n/ac/ax 4T4R 2.4/5GHz PCIe Chip (5.9+)
 
-Status: no firmware, not compiled
+Status: firmware not included
 
 -----
 
 MT7986/MT7981 802.11a/b/g/n/ac/ax 4T4R 2.4/5GHz SoC Device (5.18+)
 
-Status: no firmware, not compiled
+Status: firmware not included
 
 -----
 
@@ -135,123 +134,120 @@ by the mt7921u/e/s drivers but have their own firmware files.
 
 MT7902
 
-Status: firmware included, drivers compiled
+Status: firmware included
 
 Available in Linux firmware repository since: 2026-02-21
 
-Binary firmware for MT7902 WiFi and BT devices
+Binary firmware for MT7902 wireless devices
 
 ```
-File: mediatek/WIFI_MT7902_patch_mcu_1_1_hdr.bin
-File: mediatek/WIFI_RAM_CODE_MT7902_1.bin
+File: lib/firmware/mediatek/WIFI_MT7902_patch_mcu_1_1_hdr.bin
+File: lib/firmware/mediatek/WIFI_RAM_CODE_MT7902_1.bin
 ```
 
 ```
-BT File: mediatek/BT_RAM_CODE_MT7902_1_1_hdr.bin
+BT File: lib/firmware/mediatek/BT_RAM_CODE_MT7902_1_1_hdr.bin
 ```
 
 MT7920
 
-Status: firmware included, drivers compiled
+Status: firmware included
 
 Available in Linux firmware repository since: 2024-10-01
 
-Binary firmware for MT7920 WiFi and BT devices
+Binary firmware for MT7920 wireless devices
 
 ```
-File: mediatek/WIFI_MT7961_patch_mcu_1a_2_hdr.bin
-File: mediatek/WIFI_RAM_CODE_MT7961_1a.bin
+File: lib/firmware/mediatek/WIFI_MT7961_patch_mcu_1a_2_hdr.bin
+File: lib/firmware/mediatek/WIFI_RAM_CODE_MT7961_1a.bin
 ```
 
 ```
-BT File: mediatek/BT_RAM_CODE_MT7961_1a_2_hdr.bin
+BT File: lib/firmware/mediatek/BT_RAM_CODE_MT7961_1a_2_hdr.bin
 ```
 
 MT7921
 
-Status: firmware included, drivers compiled
+Status: firmware included
 
 Available in Linux firmware repository since: 2021-02-08
 
-Binary firmware for MT7921 WiFi and BT devices
+Binary firmware for MT7921 wireless devices
 
 ```
-WIFI File: mediatek/WIFI_MT7961_patch_mcu_1_1_hdr.bin
-WIFI File: mediatek/WIFI_RAM_CODE_MT7961_1.bin
+WIFI File: lib/firmware/mediatek/WIFI_MT7961_patch_mcu_1_1_hdr.bin
+WIFI File: lib/firmware/mediatek/WIFI_RAM_CODE_MT7961_1.bin
 ```
 
 ```
-BT File: mediatek/BT_RAM_CODE_MT7961_1_2_hdr.bin
+BT File: lib/firmware/mediatek/BT_RAM_CODE_MT7961_1_2_hdr.bin
 ```
 
 MT7922
  
-Status: firmware included, drivers compiled
+Status: firmware included
  
 Available in Linux firmware repository since: 2021-08-12
 
-Binary firmware for MT7922 WiFi and BT devices
+Binary firmware for MT7922 wireless devices
 
 ```
-WIFI File: mediatek/WIFI_MT7922_patch_mcu_1_1_hdr.bin
-WIFI File: mediatek/WIFI_RAM_CODE_MT7922_1.bin
+WIFI File: lib/firmware/mediatek/WIFI_MT7922_patch_mcu_1_1_hdr.bin
+WIFI File: lib/firmware/mediatek/WIFI_RAM_CODE_MT7922_1.bin
 ```
 
 ```
-BT File: mediatek/BT_RAM_CODE_MT7922_1_1_hdr.bin
+BT File: lib/firmware/mediatek/BT_RAM_CODE_MT7922_1_1_hdr.bin
 ```
 
 -----
 
 MT7996 802.11a/b/g/n/ac/ax/be 4T4R 2.4/5G/6GHz PCIe Chip (6.2+)
 
-Status: no firmware, not compiled
+Status: firmware not included
 
 -----
 
 MT7925 802.11a/b/g/n/ac/ax/be 2T2R 2.4/5G/6GHz PCIe/USB Chip (6.7+)
 
-Status: firmware included, driver compiled
+Status: firmware included
 
 Available in Linux firmware repository since: 2024-01-02
 
-Binary firmware for MT7925 WiFi and BT devices
+Binary firmware for MT7925 wireless devices
 
 ```
-WIFI File: mediatek/mt7925/WIFI_MT7925_PATCH_MCU_1_1_hdr.bin
-WIFI File: mediatek/mt7925/WIFI_RAM_CODE_MT7925_1_1.bin
+WIFI File: lib/firmware/mediatek/mt7925/WIFI_MT7925_PATCH_MCU_1_1_hdr.bin
+WIFI File: lib/firmware/mediatek/mt7925/WIFI_RAM_CODE_MT7925_1_1.bin
 ```
 
 ```
-BT File: mediatek/mt7925/BT_RAM_CODE_MT7925_1_1_hdr.bin
+BT File: lib/firmware/mediatek/mt7925/BT_RAM_CODE_MT7925_1_1_hdr.bin
 ```
 
 -----
 
 MT7992 802.11a/b/g/n/ac/ax/be 4T4R 2.4/5T5R 5G PCIe Chip (6.8+)
 
-Status: no firmware, not compiled
+Status: firmware not included
 
 -----
 
 MT7927 802.11a/b/g/n/ac/ax/be 2T2R 2.4/5G/6GHz PCIe Chip (7.2+)
 
-Status: WiFi firmware included (mirrored from upstream submission,
-  pending application by linux-firmware). BT firmware not yet
-  submitted upstream. Driver handled by mt7925e in mainline.
+Status: firmware included
 
-Available in Linux firmware repository since: pending
-  (https://lore.kernel.org/linux-firmware/20260425195810.790773-1-sean.wang@kernel.org/)
+Available in Linux firmware repository since: 2026-05-19
 
-Binary firmware for MT7927 WiFi devices
+Binary firmware for MT7927 wireless devices
 
 ```
-WIFI File: mediatek/mt7927/WIFI_MT6639_PATCH_MCU_2_1_hdr.bin
-WIFI File: mediatek/mt7927/WIFI_RAM_CODE_MT6639_2_1.bin
+WIFI File: lib/firmware/mediatek/mt7927/WIFI_MT6639_PATCH_MCU_2_1_hdr.bin
+WIFI File: lib/firmware/mediatek/mt7927/WIFI_RAM_CODE_MT6639_2_1.bin
 ```
 
 ```
-BT File: (pending separate upstream submission by MediaTek)
+BT File: lib/firmware/BT_RAM_CODE_MT6639_2_1_hdr.bin
 ```
 
 -----
