@@ -25,7 +25,7 @@ ifneq ($(KERNELRELEASE),)
 
 # Bake the git commit into every module for traceability (visible via modinfo)
 GIT_COMMIT := $(shell git --git-dir=$(src)/.git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-EXTRA_CFLAGS += -Werror -DCONFIG_MT76_LEDS -DCONFIG_MT76_DEBUGFS \
+ccflags-y += -Werror -DCONFIG_MT76_LEDS -DCONFIG_MT76_DEBUGFS \
 	-DGIT_COMMIT=\"$(GIT_COMMIT)\"
 
 # --- Core ---
