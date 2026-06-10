@@ -336,9 +336,16 @@ void mt792x_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 }
 EXPORT_SYMBOL_GPL(mt792x_flush);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 int mt792x_get_txpower(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		       unsigned int link_id, int *dbm)
 {
+#else
+int mt792x_get_txpower(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+		       int *dbm)
+{
+	unsigned int link_id = 0;
+#endif
 	struct mt76_power_limits limits = {};
 	struct ieee80211_bss_conf *link_conf;
 	struct ieee80211_channel *chan;
@@ -348,7 +355,11 @@ int mt792x_get_txpower(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	s8 max_power;
 
 	if (!vif)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 		return mt76_get_txpower(hw, vif, link_id, dbm);
+#else
+		return mt76_get_txpower(hw, vif, dbm);
+#endif
 
 	mvif = (struct mt792x_vif *)vif->drv_priv;
 	phy = mvif->phy->mt76;

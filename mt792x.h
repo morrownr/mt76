@@ -418,8 +418,13 @@ void mt792x_roc_timer(struct timer_list *timer);
 void mt792x_csa_timer(struct timer_list *timer);
 void mt792x_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		  u32 queues, bool drop);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 int mt792x_get_txpower(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		       unsigned int link_id, int *dbm);
+#else
+int mt792x_get_txpower(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+		       int *dbm);
+#endif
 int mt792x_assign_vif_chanctx(struct ieee80211_hw *hw,
 			      struct ieee80211_vif *vif,
 			      struct ieee80211_bss_conf *link_conf,
