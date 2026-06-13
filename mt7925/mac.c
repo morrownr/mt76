@@ -1515,6 +1515,9 @@ void mt7925_mac_reset_work(struct work_struct *work)
 	struct mt76_connac_pm *pm = &dev->pm;
 	int i, ret;
 
+	if (atomic_read(&dev->mt76.bus_hung))
+		return;
+
 	dev_dbg(dev->mt76.dev, "chip reset\n");
 	dev->hw_full_reset = true;
 	ieee80211_stop_queues(hw);
@@ -1531,6 +1534,9 @@ void mt7925_mac_reset_work(struct work_struct *work)
 		if (!ret)
 			break;
 	}
+
+	if (atomic_read(&dev->mt76.bus_hung))
+		return;
 
 	if (i == 10)
 		dev_err(dev->mt76.dev, "chip reset failed\n");
