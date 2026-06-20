@@ -5,6 +5,7 @@
 #include <linux/firmware.h>
 
 #include "mt792x.h"
+#include "mt76_connac.h"
 #include "dma.h"
 
 /* timer_container_of was renamed from from_timer in kernel 6.16. */
@@ -92,7 +93,6 @@ void mt792x_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *control,
 	struct ieee80211_vif *vif = info->control.vif;
 	struct mt76_wcid *wcid = &dev->mt76.global_wcid;
 	u8 link_id;
-	int qid;
 
 	if (control->sta) {
 		struct mt792x_link_sta *mlink;
@@ -134,12 +134,6 @@ void mt792x_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *control,
 		mt76_tx(mphy, control->sta, wcid, skb);
 		mt76_connac_pm_unref(mphy, &dev->pm);
 		return;
-	}
-
-	qid = skb_get_queue_mapping(skb);
-	if (qid >= MT_TXQ_PSD) {
-		qid = IEEE80211_AC_BE;
-		skb_set_queue_mapping(skb, qid);
 	}
 
 	mt76_connac_pm_queue_skb(hw, &dev->pm, wcid, skb);
@@ -746,7 +740,10 @@ int mt792x_init_wiphy(struct ieee80211_hw *hw)
 	ieee80211_hw_set(hw, HAS_RATE_CONTROL);
 	ieee80211_hw_set(hw, SUPPORTS_TX_ENCAP_OFFLOAD);
 	ieee80211_hw_set(hw, SUPPORTS_RX_DECAP_OFFLOAD);
-	ieee80211_hw_set(hw, WANT_MONITOR_VIF);
+	if (is_mt7927(&dev->mt76))
+		ieee80211_hw_set(hw, NO_VIRTUAL_MONITOR);
+	else
+		ieee80211_hw_set(hw, WANT_MONITOR_VIF);
 	ieee80211_hw_set(hw, SUPPORTS_PS);
 	ieee80211_hw_set(hw, SUPPORTS_DYNAMIC_PS);
 	ieee80211_hw_set(hw, SUPPORTS_VHT_EXT_NSS_BW);

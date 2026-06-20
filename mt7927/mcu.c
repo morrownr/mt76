@@ -3,7 +3,7 @@
 
 #include <linux/fs.h>
 #include <linux/firmware.h>
-#include "mt7925.h"
+#include "mt7927.h"
 #include "regd.h"
 #include "mcu.h"
 #include "mac.h"
@@ -11,11 +11,11 @@
 #define MT_STA_BFER			BIT(0)
 #define MT_STA_BFEE			BIT(1)
 
-int mt7925_mcu_parse_response(struct mt76_dev *mdev, int cmd,
+int mt7927_mcu_parse_response(struct mt76_dev *mdev, int cmd,
 			      struct sk_buff *skb, int seq)
 {
 	int mcu_cmd = FIELD_GET(__MCU_CMD_FIELD_ID, cmd);
-	struct mt7925_mcu_rxd *rxd;
+	struct mt7927_mcu_rxd *rxd;
 	int ret = 0;
 
 	if (!skb) {
@@ -25,7 +25,7 @@ int mt7925_mcu_parse_response(struct mt76_dev *mdev, int cmd,
 		return -ETIMEDOUT;
 	}
 
-	rxd = (struct mt7925_mcu_rxd *)skb->data;
+	rxd = (struct mt7927_mcu_rxd *)skb->data;
 	if (seq != rxd->seq)
 		return -EAGAIN;
 
@@ -38,10 +38,10 @@ int mt7925_mcu_parse_response(struct mt76_dev *mdev, int cmd,
 		   cmd == MCU_UNI_CMD(STA_REC_UPDATE) ||
 		   cmd == MCU_UNI_CMD(OFFLOAD) ||
 		   cmd == MCU_UNI_CMD(SUSPEND)) {
-		struct mt7925_mcu_uni_event *event;
+		struct mt7927_mcu_uni_event *event;
 
 		skb_pull(skb, sizeof(*rxd));
-		event = (struct mt7925_mcu_uni_event *)skb->data;
+		event = (struct mt7927_mcu_uni_event *)skb->data;
 		ret = le32_to_cpu(event->status);
 		/* skip invalid event */
 		if (mcu_cmd != event->cid)
@@ -52,9 +52,9 @@ int mt7925_mcu_parse_response(struct mt76_dev *mdev, int cmd,
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(mt7925_mcu_parse_response);
+EXPORT_SYMBOL_GPL(mt7927_mcu_parse_response);
 
-int mt7925_mcu_regval(struct mt792x_dev *dev, u32 regidx, u32 *val, bool set)
+int mt7927_mcu_regval(struct mt792x_dev *dev, u32 regidx, u32 *val, bool set)
 {
 #define MT_RF_REG_HDR           GENMASK(31, 24)
 #define MT_RF_REG_ANT           GENMASK(23, 16)
@@ -114,9 +114,9 @@ int mt7925_mcu_regval(struct mt792x_dev *dev, u32 regidx, u32 *val, bool set)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(mt7925_mcu_regval);
+EXPORT_SYMBOL_GPL(mt7927_mcu_regval);
 
-int mt7925_mcu_update_arp_filter(struct mt76_dev *dev,
+int mt7927_mcu_update_arp_filter(struct mt76_dev *dev,
 				 struct ieee80211_bss_conf *link_conf)
 {
 	struct mt792x_bss_conf *mconf = mt792x_link_conf_to_mconf(link_conf);
@@ -129,7 +129,7 @@ int mt7925_mcu_update_arp_filter(struct mt76_dev *dev,
 			u8 bss_idx;
 			u8 pad[3];
 		} __packed hdr;
-		struct mt7925_arpns_tlv arp;
+		struct mt7927_arpns_tlv arp;
 	} req = {
 		.hdr = {
 			.bss_idx = mconf->mt76.idx,
@@ -157,7 +157,7 @@ int mt7925_mcu_update_arp_filter(struct mt76_dev *dev,
 
 #ifdef CONFIG_PM
 static int
-mt7925_connac_mcu_set_wow_ctrl(struct mt76_phy *phy, struct ieee80211_vif *vif,
+mt7927_connac_mcu_set_wow_ctrl(struct mt76_phy *phy, struct ieee80211_vif *vif,
 			       bool suspend, struct cfg80211_wowlan *wowlan)
 {
 	struct mt76_vif_link *mvif = (struct mt76_vif_link *)vif->drv_priv;
@@ -192,9 +192,9 @@ mt7925_connac_mcu_set_wow_ctrl(struct mt76_phy *phy, struct ieee80211_vif *vif,
 		req.wow_ctrl_tlv.trigger |= (UNI_WOW_DETECT_TYPE_DISCONNECT |
 					     UNI_WOW_DETECT_TYPE_BCN_LOST);
 	if (wowlan->nd_config) {
-		mt7925_mcu_sched_scan_req(phy, vif, wowlan->nd_config, &ies);
+		mt7927_mcu_sched_scan_req(phy, vif, wowlan->nd_config, &ies);
 		req.wow_ctrl_tlv.trigger |= UNI_WOW_DETECT_TYPE_SCH_SCAN_HIT;
-		mt7925_mcu_sched_scan_enable(phy, vif, suspend);
+		mt7927_mcu_sched_scan_enable(phy, vif, suspend);
 	}
 	if (wowlan->n_patterns)
 		req.wow_ctrl_tlv.trigger |= UNI_WOW_DETECT_TYPE_BITMAP;
@@ -211,13 +211,13 @@ mt7925_connac_mcu_set_wow_ctrl(struct mt76_phy *phy, struct ieee80211_vif *vif,
 }
 
 static int
-mt7925_mcu_set_wow_pattern(struct mt76_dev *dev,
+mt7927_mcu_set_wow_pattern(struct mt76_dev *dev,
 			   struct ieee80211_vif *vif,
 			   u8 index, bool enable,
 			   struct cfg80211_pkt_pattern *pattern)
 {
 	struct mt76_vif_link *mvif = (struct mt76_vif_link *)vif->drv_priv;
-	struct mt7925_wow_pattern_tlv *tlv;
+	struct mt7927_wow_pattern_tlv *tlv;
 	struct sk_buff *skb;
 	struct {
 		u8 bss_idx;
@@ -231,7 +231,7 @@ mt7925_mcu_set_wow_pattern(struct mt76_dev *dev,
 		return -ENOMEM;
 
 	skb_put_data(skb, &hdr, sizeof(hdr));
-	tlv = (struct mt7925_wow_pattern_tlv *)skb_put(skb, sizeof(*tlv));
+	tlv = (struct mt7927_wow_pattern_tlv *)skb_put(skb, sizeof(*tlv));
 	tlv->tag = cpu_to_le16(UNI_SUSPEND_WOW_PATTERN);
 	tlv->len = cpu_to_le16(sizeof(*tlv));
 	tlv->bss_idx = 0xF;
@@ -246,7 +246,7 @@ mt7925_mcu_set_wow_pattern(struct mt76_dev *dev,
 	return mt76_mcu_skb_send_msg(dev, skb, MCU_UNI_CMD(SUSPEND), true);
 }
 
-void mt7925_mcu_set_suspend_iter(void *priv, u8 *mac,
+void mt7927_mcu_set_suspend_iter(void *priv, u8 *mac,
 				 struct ieee80211_vif *vif)
 {
 	struct mt76_phy *phy = priv;
@@ -260,19 +260,19 @@ void mt7925_mcu_set_suspend_iter(void *priv, u8 *mac,
 	mt76_connac_mcu_set_suspend_mode(phy->dev, vif, suspend, 1, true);
 
 	for (i = 0; i < wowlan->n_patterns; i++)
-		mt7925_mcu_set_wow_pattern(phy->dev, vif, i, suspend,
+		mt7927_mcu_set_wow_pattern(phy->dev, vif, i, suspend,
 					   &wowlan->patterns[i]);
-	mt7925_connac_mcu_set_wow_ctrl(phy, vif, suspend, wowlan);
+	mt7927_connac_mcu_set_wow_ctrl(phy, vif, suspend, wowlan);
 }
 
 #endif /* CONFIG_PM */
 
 static void
-mt7925_mcu_connection_loss_iter(void *priv, u8 *mac,
+mt7927_mcu_connection_loss_iter(void *priv, u8 *mac,
 				struct ieee80211_vif *vif)
 {
 	struct mt76_vif_link *mvif = (struct mt76_vif_link *)vif->drv_priv;
-	struct mt7925_uni_beacon_loss_event *event = priv;
+	struct mt7927_uni_beacon_loss_event *event = priv;
 
 	if (mvif->idx != event->hdr.bss_idx)
 		return;
@@ -285,24 +285,24 @@ mt7925_mcu_connection_loss_iter(void *priv, u8 *mac,
 }
 
 static void
-mt7925_mcu_connection_loss_event(struct mt792x_dev *dev, struct sk_buff *skb)
+mt7927_mcu_connection_loss_event(struct mt792x_dev *dev, struct sk_buff *skb)
 {
-	struct mt7925_uni_beacon_loss_event *event;
+	struct mt7927_uni_beacon_loss_event *event;
 	struct mt76_phy *mphy = &dev->mt76.phy;
 
-	skb_pull(skb, sizeof(struct mt7925_mcu_rxd));
-	event = (struct mt7925_uni_beacon_loss_event *)skb->data;
+	skb_pull(skb, sizeof(struct mt7927_mcu_rxd));
+	event = (struct mt7927_uni_beacon_loss_event *)skb->data;
 
 	ieee80211_iterate_active_interfaces_atomic(mphy->hw,
 					IEEE80211_IFACE_ITER_RESUME_ALL,
-					mt7925_mcu_connection_loss_iter, event);
+					mt7927_mcu_connection_loss_iter, event);
 }
 
 static void
-mt7925_mcu_roc_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
+mt7927_mcu_roc_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
 {
+	struct mt7927_roc_grant_tlv *grant = priv;
 	struct mt76_vif_link *mvif = (struct mt76_vif_link *)vif->drv_priv;
-	struct mt7925_roc_grant_tlv *grant = priv;
 
 	if (ieee80211_vif_is_mld(vif) && vif->type == NL80211_IFTYPE_STATION)
 		return;
@@ -313,24 +313,24 @@ mt7925_mcu_roc_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
 	mvif->band_idx = grant->dbdcband;
 }
 
-static void mt7925_mcu_roc_handle_grant(struct mt792x_dev *dev,
+static void mt7927_mcu_roc_handle_grant(struct mt792x_dev *dev,
 					struct tlv *tlv)
 {
 	struct ieee80211_hw *hw = dev->mt76.hw;
-	struct mt7925_roc_grant_tlv *grant;
+	struct mt7927_roc_grant_tlv *grant;
 	int duration;
 
-	grant = (struct mt7925_roc_grant_tlv *)tlv;
+	grant = (struct mt7927_roc_grant_tlv *)tlv;
 
 	/* should never happen */
 	WARN_ON_ONCE((le16_to_cpu(grant->tag) != UNI_EVENT_ROC_GRANT));
 
-	if (grant->reqtype == MT7925_ROC_REQ_ROC)
+	if (grant->reqtype == MT7927_ROC_REQ_ROC)
 		ieee80211_ready_on_channel(hw);
-	else if (grant->reqtype == MT7925_ROC_REQ_JOIN)
+	else if (grant->reqtype == MT7927_ROC_REQ_JOIN)
 		ieee80211_iterate_active_interfaces_atomic(hw,
 						IEEE80211_IFACE_ITER_RESUME_ALL,
-						mt7925_mcu_roc_iter, grant);
+						mt7927_mcu_roc_iter, grant);
 	dev->phy.roc_grant = true;
 	wake_up(&dev->phy.roc_wait);
 	duration = le32_to_cpu(grant->max_interval);
@@ -339,11 +339,11 @@ static void mt7925_mcu_roc_handle_grant(struct mt792x_dev *dev,
 }
 
 static void
-mt7925_mcu_handle_hif_ctrl_basic(struct mt792x_dev *dev, struct tlv *tlv)
+mt7927_mcu_handle_hif_ctrl_basic(struct mt792x_dev *dev, struct tlv *tlv)
 {
-	struct mt7925_mcu_hif_ctrl_basic_tlv *basic;
+	struct mt7927_mcu_hif_ctrl_basic_tlv *basic;
 
-	basic = (struct mt7925_mcu_hif_ctrl_basic_tlv *)tlv;
+	basic = (struct mt7927_mcu_hif_ctrl_basic_tlv *)tlv;
 
 	if (basic->hifsuspend) {
 		dev->hif_idle = true;
@@ -357,19 +357,19 @@ mt7925_mcu_handle_hif_ctrl_basic(struct mt792x_dev *dev, struct tlv *tlv)
 }
 
 static void
-mt7925_mcu_uni_hif_ctrl_event(struct mt792x_dev *dev, struct sk_buff *skb)
+mt7927_mcu_uni_hif_ctrl_event(struct mt792x_dev *dev, struct sk_buff *skb)
 {
 	struct tlv *tlv;
 	u32 tlv_len;
 
-	skb_pull(skb, sizeof(struct mt7925_mcu_rxd) + 4);
+	skb_pull(skb, sizeof(struct mt7927_mcu_rxd) + 4);
 	tlv = (struct tlv *)skb->data;
 	tlv_len = skb->len;
 
 	while (tlv_len > 0 && le16_to_cpu(tlv->len) <= tlv_len) {
 		switch (le16_to_cpu(tlv->tag)) {
 		case UNI_EVENT_HIF_CTRL_BASIC:
-			mt7925_mcu_handle_hif_ctrl_basic(dev, tlv);
+			mt7927_mcu_handle_hif_ctrl_basic(dev, tlv);
 			break;
 		default:
 			break;
@@ -380,19 +380,19 @@ mt7925_mcu_uni_hif_ctrl_event(struct mt792x_dev *dev, struct sk_buff *skb)
 }
 
 static void
-mt7925_mcu_uni_roc_event(struct mt792x_dev *dev, struct sk_buff *skb)
+mt7927_mcu_uni_roc_event(struct mt792x_dev *dev, struct sk_buff *skb)
 {
 	struct tlv *tlv;
 	int i = 0;
 
-	skb_pull(skb, sizeof(struct mt7925_mcu_rxd) + 4);
+	skb_pull(skb, sizeof(struct mt7927_mcu_rxd) + 4);
 
 	while (i < skb->len) {
 		tlv = (struct tlv *)(skb->data + i);
 
 		switch (le16_to_cpu(tlv->tag)) {
 		case UNI_EVENT_ROC_GRANT:
-			mt7925_mcu_roc_handle_grant(dev, tlv);
+			mt7927_mcu_roc_handle_grant(dev, tlv);
 			break;
 		case UNI_EVENT_ROC_GRANT_SUB_LINK:
 			break;
@@ -403,7 +403,7 @@ mt7925_mcu_uni_roc_event(struct mt792x_dev *dev, struct sk_buff *skb)
 }
 
 static void
-mt7925_mcu_scan_event(struct mt792x_dev *dev, struct sk_buff *skb)
+mt7927_mcu_scan_event(struct mt792x_dev *dev, struct sk_buff *skb)
 {
 	struct mt76_phy *mphy = &dev->mt76.phy;
 	struct mt792x_phy *phy = mphy->priv;
@@ -417,11 +417,11 @@ mt7925_mcu_scan_event(struct mt792x_dev *dev, struct sk_buff *skb)
 }
 
 static void
-mt7925_mcu_tx_done_event(struct mt792x_dev *dev, struct sk_buff *skb)
+mt7927_mcu_tx_done_event(struct mt792x_dev *dev, struct sk_buff *skb)
 {
 #define UNI_EVENT_TX_DONE_MSG 0
 #define UNI_EVENT_TX_DONE_RAW 1
-	struct mt7925_mcu_txs_event {
+	struct mt7927_mcu_txs_event {
 		u8 ver;
 		u8 rsv[3];
 		u8 data[];
@@ -429,15 +429,15 @@ mt7925_mcu_tx_done_event(struct mt792x_dev *dev, struct sk_buff *skb)
 	struct tlv *tlv;
 	u32 tlv_len;
 
-	skb_pull(skb, sizeof(struct mt7925_mcu_rxd) + 4);
+	skb_pull(skb, sizeof(struct mt7927_mcu_rxd) + 4);
 	tlv = (struct tlv *)skb->data;
 	tlv_len = skb->len;
 
 	while (tlv_len > 0 && le16_to_cpu(tlv->len) <= tlv_len) {
 		switch (le16_to_cpu(tlv->tag)) {
 		case UNI_EVENT_TX_DONE_RAW:
-			txs = (struct mt7925_mcu_txs_event *)tlv->data;
-			mt7925_mac_add_txs(dev, txs->data);
+			txs = (struct mt7927_mcu_txs_event *)tlv->data;
+			mt7927_mac_add_txs(dev, txs->data);
 			break;
 		default:
 			break;
@@ -448,10 +448,10 @@ mt7925_mcu_tx_done_event(struct mt792x_dev *dev, struct sk_buff *skb)
 }
 
 static void
-mt7925_mcu_rssi_monitor_iter(void *priv, u8 *mac,
+mt7927_mcu_rssi_monitor_iter(void *priv, u8 *mac,
 			     struct ieee80211_vif *vif)
 {
-	struct mt7925_uni_rssi_monitor_event *event = priv;
+	struct mt7927_uni_rssi_monitor_event *event = priv;
 	enum nl80211_cqm_rssi_threshold_event nl_event;
 	s32 rssi = le32_to_cpu(event->rssi);
 
@@ -470,23 +470,23 @@ mt7925_mcu_rssi_monitor_iter(void *priv, u8 *mac,
 }
 
 static void
-mt7925_mcu_rssi_monitor_event(struct mt792x_dev *dev, struct sk_buff *skb)
+mt7927_mcu_rssi_monitor_event(struct mt792x_dev *dev, struct sk_buff *skb)
 {
 	struct tlv *tlv;
 	u32 tlv_len;
-	struct mt7925_uni_rssi_monitor_event *event;
+	struct mt7927_uni_rssi_monitor_event *event;
 
-	skb_pull(skb, sizeof(struct mt7925_mcu_rxd) + 4);
+	skb_pull(skb, sizeof(struct mt7927_mcu_rxd) + 4);
 	tlv = (struct tlv *)skb->data;
 	tlv_len = skb->len;
 
 	while (tlv_len > 0 && le16_to_cpu(tlv->len) <= tlv_len) {
 		switch (le16_to_cpu(tlv->tag)) {
 		case UNI_EVENT_RSSI_MONITOR_INFO:
-			event = (struct mt7925_uni_rssi_monitor_event *)skb->data;
+			event = (struct mt7927_uni_rssi_monitor_event *)skb->data;
 			ieee80211_iterate_active_interfaces_atomic(dev->mt76.hw,
 								   IEEE80211_IFACE_ITER_RESUME_ALL,
-								   mt7925_mcu_rssi_monitor_iter,
+								   mt7927_mcu_rssi_monitor_iter,
 								   event);
 			break;
 		default:
@@ -498,9 +498,9 @@ mt7925_mcu_rssi_monitor_event(struct mt792x_dev *dev, struct sk_buff *skb)
 }
 
 static void
-mt7925_mcu_uni_debug_msg_event(struct mt792x_dev *dev, struct sk_buff *skb)
+mt7927_mcu_uni_debug_msg_event(struct mt792x_dev *dev, struct sk_buff *skb)
 {
-	struct mt7925_uni_debug_msg {
+	struct mt7927_uni_debug_msg {
 		__le16 tag;
 		__le16 len;
 		u8 fmt;
@@ -524,11 +524,11 @@ mt7925_mcu_uni_debug_msg_event(struct mt792x_dev *dev, struct sk_buff *skb)
 		};
 	} __packed * hdr;
 
-	skb_pull(skb, sizeof(struct mt7925_mcu_rxd) + 4);
-	hdr = (struct mt7925_uni_debug_msg *)skb->data;
+	skb_pull(skb, sizeof(struct mt7927_mcu_rxd) + 4);
+	hdr = (struct mt7927_uni_debug_msg *)skb->data;
 
 	if (hdr->id == 0x28) {
-		skb_pull(skb, offsetof(struct mt7925_uni_debug_msg, id));
+		skb_pull(skb, offsetof(struct mt7927_uni_debug_msg, id));
 		wiphy_info(mt76_hw(dev)->wiphy, "%.*s", skb->len, skb->data);
 		return;
 	} else if (hdr->id != 0xa8) {
@@ -567,12 +567,12 @@ mt7925_mcu_uni_debug_msg_event(struct mt792x_dev *dev, struct sk_buff *skb)
 }
 
 static void
-mt7925_mcu_handle_mbmc_event(struct mt792x_dev *dev, struct sk_buff *skb)
+mt7927_mcu_handle_mbmc_event(struct mt792x_dev *dev, struct sk_buff *skb)
 {
 	struct mbmc_conf_tlv *tlv;
 	u32 tlv_len;
 
-	skb_pull(skb, sizeof(struct mt7925_mcu_rxd) + 4);
+	skb_pull(skb, sizeof(struct mt7927_mcu_rxd) + 4);
 	tlv_len = skb->len;
 	tlv = (struct mbmc_conf_tlv *)skb->data;
 
@@ -595,37 +595,37 @@ mt7925_mcu_handle_mbmc_event(struct mt792x_dev *dev, struct sk_buff *skb)
 }
 
 static void
-mt7925_mcu_uni_rx_unsolicited_event(struct mt792x_dev *dev,
+mt7927_mcu_uni_rx_unsolicited_event(struct mt792x_dev *dev,
 				    struct sk_buff *skb)
 {
-	struct mt7925_mcu_rxd *rxd;
+	struct mt7927_mcu_rxd *rxd;
 
-	rxd = (struct mt7925_mcu_rxd *)skb->data;
+	rxd = (struct mt7927_mcu_rxd *)skb->data;
 
 	switch (rxd->eid) {
 	case MCU_UNI_EVENT_HIF_CTRL:
-		mt7925_mcu_uni_hif_ctrl_event(dev, skb);
+		mt7927_mcu_uni_hif_ctrl_event(dev, skb);
 		break;
 	case MCU_UNI_EVENT_FW_LOG_2_HOST:
-		mt7925_mcu_uni_debug_msg_event(dev, skb);
+		mt7927_mcu_uni_debug_msg_event(dev, skb);
 		break;
 	case MCU_UNI_EVENT_ROC:
-		mt7925_mcu_uni_roc_event(dev, skb);
+		mt7927_mcu_uni_roc_event(dev, skb);
 		break;
 	case MCU_UNI_EVENT_MBMC:
-		mt7925_mcu_handle_mbmc_event(dev, skb);
+		mt7927_mcu_handle_mbmc_event(dev, skb);
 		break;
 	case MCU_UNI_EVENT_SCAN_DONE:
-		mt7925_mcu_scan_event(dev, skb);
+		mt7927_mcu_scan_event(dev, skb);
 		return;
 	case MCU_UNI_EVENT_TX_DONE:
-		mt7925_mcu_tx_done_event(dev, skb);
+		mt7927_mcu_tx_done_event(dev, skb);
 		break;
 	case MCU_UNI_EVENT_BSS_BEACON_LOSS:
-		mt7925_mcu_connection_loss_event(dev, skb);
+		mt7927_mcu_connection_loss_event(dev, skb);
 		break;
 	case MCU_UNI_EVENT_RSSI_MONITOR:
-		mt7925_mcu_rssi_monitor_event(dev, skb);
+		mt7927_mcu_rssi_monitor_event(dev, skb);
 		break;
 	case MCU_UNI_EVENT_COREDUMP:
 		dev->fw_assert = true;
@@ -637,15 +637,15 @@ mt7925_mcu_uni_rx_unsolicited_event(struct mt792x_dev *dev,
 	dev_kfree_skb(skb);
 }
 
-void mt7925_mcu_rx_event(struct mt792x_dev *dev, struct sk_buff *skb)
+void mt7927_mcu_rx_event(struct mt792x_dev *dev, struct sk_buff *skb)
 {
-	struct mt7925_mcu_rxd *rxd = (struct mt7925_mcu_rxd *)skb->data;
+	struct mt7927_mcu_rxd *rxd = (struct mt7927_mcu_rxd *)skb->data;
 
 	if (skb_linearize(skb))
 		return;
 
 	if (rxd->option & MCU_UNI_CMD_UNSOLICITED_EVENT) {
-		mt7925_mcu_uni_rx_unsolicited_event(dev, skb);
+		mt7927_mcu_uni_rx_unsolicited_event(dev, skb);
 		return;
 	}
 
@@ -653,7 +653,7 @@ void mt7925_mcu_rx_event(struct mt792x_dev *dev, struct sk_buff *skb)
 }
 
 static int
-mt7925_mcu_sta_ba(struct mt76_dev *dev, struct mt76_vif_link *mvif,
+mt7927_mcu_sta_ba(struct mt76_dev *dev, struct mt76_vif_link *mvif,
 		  struct ieee80211_ampdu_params *params,
 		  struct mt76_wcid *wcid, bool enable, bool tx)
 {
@@ -682,7 +682,7 @@ mt7925_mcu_sta_ba(struct mt76_dev *dev, struct mt76_vif_link *mvif,
 				     MCU_UNI_CMD(STA_REC_UPDATE), true);
 }
 
-int mt7925_mcu_uni_tx_ba(struct mt792x_dev *dev,
+int mt7927_mcu_uni_tx_ba(struct mt792x_dev *dev,
 			 struct ieee80211_ampdu_params *params,
 			 struct ieee80211_vif *vif, bool enable)
 {
@@ -707,7 +707,7 @@ int mt7925_mcu_uni_tx_ba(struct mt792x_dev *dev,
 		if (enable && !params->amsdu)
 			mlink->wcid.amsdu = false;
 
-		ret = mt7925_mcu_sta_ba(&dev->mt76, &mconf->mt76, params,
+		ret = mt7927_mcu_sta_ba(&dev->mt76, &mconf->mt76, params,
 					&mlink->wcid, enable, true);
 		if (ret)
 			return ret;
@@ -716,7 +716,7 @@ int mt7925_mcu_uni_tx_ba(struct mt792x_dev *dev,
 	return 0;
 }
 
-int mt7925_mcu_uni_rx_ba(struct mt792x_dev *dev,
+int mt7927_mcu_uni_rx_ba(struct mt792x_dev *dev,
 			 struct ieee80211_ampdu_params *params,
 			 struct ieee80211_vif *vif, bool enable)
 {
@@ -738,7 +738,7 @@ int mt7925_mcu_uni_rx_ba(struct mt792x_dev *dev,
 		if (!mconf)
 			return -EINVAL;
 
-		ret = mt7925_mcu_sta_ba(&dev->mt76, &mconf->mt76, params,
+		ret = mt7927_mcu_sta_ba(&dev->mt76, &mconf->mt76, params,
 					&mlink->wcid, enable, false);
 		if (ret)
 			return ret;
@@ -747,7 +747,7 @@ int mt7925_mcu_uni_rx_ba(struct mt792x_dev *dev,
 	return 0;
 }
 
-static int mt7925_mcu_read_eeprom(struct mt792x_dev *dev, u32 offset, u8 *val)
+static int mt7927_mcu_read_eeprom(struct mt792x_dev *dev, u32 offset, u8 *val)
 {
 	struct {
 		u8 rsv[4];
@@ -757,12 +757,12 @@ static int mt7925_mcu_read_eeprom(struct mt792x_dev *dev, u32 offset, u8 *val)
 
 		__le32 addr;
 		__le32 valid;
-		u8 data[MT7925_EEPROM_BLOCK_SIZE];
+		u8 data[MT7927_EEPROM_BLOCK_SIZE];
 	} __packed req = {
 		.tag = cpu_to_le16(1),
 		.len = cpu_to_le16(sizeof(req) - 4),
 		.addr = cpu_to_le32(round_down(offset,
-				    MT7925_EEPROM_BLOCK_SIZE)),
+				    MT7927_EEPROM_BLOCK_SIZE)),
 	};
 	struct evt {
 		u8 rsv[4];
@@ -788,18 +788,18 @@ static int mt7925_mcu_read_eeprom(struct mt792x_dev *dev, u32 offset, u8 *val)
 		return ret;
 
 	res = (struct evt *)skb->data;
-	*val = res->data[offset % MT7925_EEPROM_BLOCK_SIZE];
+	*val = res->data[offset % MT7927_EEPROM_BLOCK_SIZE];
 
 	dev_kfree_skb(skb);
 
 	return 0;
 }
 
-static int mt7925_load_clc(struct mt792x_dev *dev, const char *fw_name)
+static int mt7927_load_clc(struct mt792x_dev *dev, const char *fw_name)
 {
 	const struct mt76_connac2_fw_trailer *hdr;
 	const struct mt76_connac2_fw_region *region;
-	const struct mt7925_clc *clc;
+	const struct mt7927_clc *clc;
 	struct mt76_dev *mdev = &dev->mt76;
 	struct mt792x_phy *phy = &dev->phy;
 	const struct firmware *fw;
@@ -808,11 +808,11 @@ static int mt7925_load_clc(struct mt792x_dev *dev, const char *fw_name)
 
 	dev->phy.clc_chan_conf = 0xff;
 	dev->regd_user = false;
-	if (!mt7925_regd_clc_supported(dev))
+	if (!mt7927_regd_clc_supported(dev))
 		return 0;
 
 	if (mt76_is_mmio(&dev->mt76)) {
-		ret = mt7925_mcu_read_eeprom(dev, MT_EE_HW_TYPE, &hw_encap);
+		ret = mt7927_mcu_read_eeprom(dev, MT_EE_HW_TYPE, &hw_encap);
 		if (ret)
 			return ret;
 		hw_encap = u8_get_bits(hw_encap, MT_EE_HW_TYPE_ENCAP);
@@ -853,7 +853,7 @@ static int mt7925_load_clc(struct mt792x_dev *dev, const char *fw_name)
 		goto out;
 
 	for (offset = 0; offset < len; offset += le32_to_cpu(clc->len)) {
-		clc = (const struct mt7925_clc *)(clc_base + offset);
+		clc = (const struct mt7927_clc *)(clc_base + offset);
 
 		if (clc->idx >= ARRAY_SIZE(phy->clc))
 			break;
@@ -878,14 +878,14 @@ static int mt7925_load_clc(struct mt792x_dev *dev, const char *fw_name)
 		}
 	}
 
-	ret = mt7925_regd_init(phy);
+	ret = mt7927_regd_init(phy);
 out:
 	release_firmware(fw);
 
 	return ret;
 }
 
-int mt7925_mcu_fw_log_2_host(struct mt792x_dev *dev, u8 ctrl)
+int mt7927_mcu_fw_log_2_host(struct mt792x_dev *dev, u8 ctrl)
 {
 	struct {
 		u8 _rsv[4];
@@ -907,7 +907,7 @@ int mt7925_mcu_fw_log_2_host(struct mt792x_dev *dev, u8 ctrl)
 	return ret;
 }
 
-int mt7925_mcu_get_temperature(struct mt792x_phy *phy)
+int mt7927_mcu_get_temperature(struct mt792x_phy *phy)
 {
 	struct {
 		u8 _rsv[4];
@@ -919,7 +919,7 @@ int mt7925_mcu_get_temperature(struct mt792x_phy *phy)
 		.tag = cpu_to_le16(0x0),
 		.len = cpu_to_le16(sizeof(req) - 4),
 	};
-	struct mt7925_thermal_evt {
+	struct mt7927_thermal_evt {
 		u8 rsv[4];
 		__le32 temperature;
 	} __packed * evt;
@@ -934,7 +934,7 @@ int mt7925_mcu_get_temperature(struct mt792x_phy *phy)
 		return ret;
 
 	skb_pull(skb, 4 + sizeof(struct tlv));
-	evt = (struct mt7925_thermal_evt *)skb->data;
+	evt = (struct mt7927_thermal_evt *)skb->data;
 
 	temperature = le32_to_cpu(evt->temperature);
 
@@ -944,11 +944,11 @@ int mt7925_mcu_get_temperature(struct mt792x_phy *phy)
 }
 
 static void
-mt7925_mcu_parse_phy_cap(struct mt792x_dev *dev, char *data)
+mt7927_mcu_parse_phy_cap(struct mt792x_dev *dev, char *data)
 {
 	struct mt76_phy *mphy = &dev->mt76.phy;
 	struct mt76_dev *mdev = mphy->dev;
-	struct mt7925_mcu_phy_cap {
+	struct mt7927_mcu_phy_cap {
 		u8 ht;
 		u8 vht;
 		u8 _5g;
@@ -968,7 +968,7 @@ mt7925_mcu_parse_phy_cap(struct mt792x_dev *dev, char *data)
 		WF0_5G
 	};
 
-	cap = (struct mt7925_mcu_phy_cap *)data;
+	cap = (struct mt7927_mcu_phy_cap *)data;
 
 	mdev->phy.antenna_mask = BIT(cap->nss) - 1;
 	mdev->phy.chainmask = mdev->phy.antenna_mask;
@@ -977,21 +977,26 @@ mt7925_mcu_parse_phy_cap(struct mt792x_dev *dev, char *data)
 }
 
 static void
-mt7925_mcu_parse_eml_cap(struct mt792x_dev *dev, char *data)
+mt7927_mcu_parse_eml_cap(struct mt792x_dev *dev, char *data, int len)
 {
-	struct mt7925_mcu_eml_cap {
-		u8 rsv[4];
-		__le16 eml_cap;
-		u8 rsv2[6];
-	} __packed * cap;
+	u16 eml_cap = 0;
 
-	cap = (struct mt7925_mcu_eml_cap *)data;
+	if (len >= 4)
+		eml_cap = le16_to_cpu(*(__le16 *)(data + 2));
+	if (!eml_cap && len >= 6)
+		eml_cap = le16_to_cpu(*(__le16 *)(data + 4));
 
-	dev->phy.eml_cap = le16_to_cpu(cap->eml_cap);
+	dev->phy.eml_cap = eml_cap;
+	if (dev->phy.eml_cap) {
+		dev->phy.chip_cap |= MT792x_CHIP_CAP_MLO_EN;
+
+		if (dev->phy.eml_cap & IEEE80211_EML_CAP_EMLSR_SUPP)
+			dev->phy.chip_cap |= MT792x_CHIP_CAP_MLO_EML_EN;
+	}
 }
 
 static int
-mt7925_mcu_get_nic_capability(struct mt792x_dev *dev)
+mt7927_mcu_get_nic_capability(struct mt792x_dev *dev)
 {
 	struct mt76_phy *mphy = &dev->mt76.phy;
 	struct {
@@ -1042,13 +1047,14 @@ mt7925_mcu_get_nic_capability(struct mt792x_dev *dev)
 			memcpy(mphy->macaddr, (void *)tlv->data, ETH_ALEN);
 			break;
 		case MT_NIC_CAP_PHY:
-			mt7925_mcu_parse_phy_cap(dev, tlv->data);
+			mt7927_mcu_parse_phy_cap(dev, tlv->data);
 			break;
 		case MT_NIC_CAP_CHIP_CAP:
 			dev->phy.chip_cap = le64_to_cpu(*(__le64 *)tlv->data);
 			break;
 		case MT_NIC_CAP_EML_CAP:
-			mt7925_mcu_parse_eml_cap(dev, tlv->data);
+			mt7927_mcu_parse_eml_cap(dev, tlv->data,
+						 len - sizeof(*tlv));
 			break;
 		default:
 			break;
@@ -1060,7 +1066,84 @@ out:
 	return ret;
 }
 
-int mt7925_mcu_chip_config(struct mt792x_dev *dev, const char *cmd)
+int mt7927_mcu_dump_nic_capability(struct mt792x_dev *dev, struct seq_file *s)
+{
+	struct {
+		u8 _rsv[4];
+
+		__le16 tag;
+		__le16 len;
+	} __packed req = {
+		.tag = cpu_to_le16(UNI_CHIP_CONFIG_NIC_CAPA),
+		.len = cpu_to_le16(sizeof(req) - 4),
+	};
+	struct mt76_connac_cap_hdr {
+		__le16 n_element;
+		u8 rsv[2];
+	} __packed * hdr;
+	struct sk_buff *skb;
+	int ret, i;
+
+	ret = mt76_mcu_send_and_get_msg(&dev->mt76, MCU_UNI_CMD(CHIP_CONFIG),
+					&req, sizeof(req), true, &skb);
+	if (ret)
+		return ret;
+
+	hdr = (struct mt76_connac_cap_hdr *)skb->data;
+	if (skb->len < sizeof(*hdr)) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	seq_printf(s, "n_element=%u\n", le16_to_cpu(hdr->n_element));
+	skb_pull(skb, sizeof(*hdr));
+
+	for (i = 0; i < le16_to_cpu(hdr->n_element); i++) {
+		struct tlv *tlv = (struct tlv *)skb->data;
+		u16 tag, len;
+
+		if (skb->len < sizeof(*tlv)) {
+			seq_printf(s, "truncated_header index=%d remaining=%u\n",
+				   i, skb->len);
+			break;
+		}
+
+		tag = le16_to_cpu(tlv->tag);
+		len = le16_to_cpu(tlv->len);
+		if (skb->len < len) {
+			seq_printf(s, "truncated_tlv index=%d tag=0x%04x len=%u remaining=%u\n",
+				   i, tag, len, skb->len);
+			break;
+		}
+
+		seq_printf(s, "index=%d tag=0x%04x len=%u", i, tag, len);
+		if (tag == MT_NIC_CAP_CHIP_CAP && len >= sizeof(*tlv) + sizeof(__le64))
+			seq_printf(s, " chip_cap=0x%016llx",
+				   le64_to_cpu(*(__le64 *)tlv->data));
+		else if (tag == MT_NIC_CAP_EML_CAP && len >= sizeof(*tlv) + 4)
+			seq_printf(s, " eml_cap=0x%04x",
+				   le16_to_cpu(*(__le16 *)(tlv->data + 2)));
+		else if (tag == MT_NIC_CAP_6G && len > sizeof(*tlv))
+			seq_printf(s, " has_6ghz=%u", !!tlv->data[0]);
+		if (len > sizeof(*tlv)) {
+			int data_len = min_t(int, len - sizeof(*tlv), 16);
+			int j;
+
+			seq_puts(s, " data=");
+			for (j = 0; j < data_len; j++)
+				seq_printf(s, "%02x", tlv->data[j]);
+		}
+		seq_puts(s, "\n");
+
+		skb_pull(skb, len);
+	}
+out:
+	dev_kfree_skb(skb);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(mt7927_mcu_dump_nic_capability);
+
+int mt7927_mcu_chip_config(struct mt792x_dev *dev, const char *cmd)
 {
 	u16 len = strlen(cmd) + 1;
 	struct {
@@ -1084,56 +1167,66 @@ int mt7925_mcu_chip_config(struct mt792x_dev *dev, const char *cmd)
 				 &req, sizeof(req), false);
 }
 
-int mt7925_mcu_set_deep_sleep(struct mt792x_dev *dev, bool enable)
+int mt7927_mcu_set_deep_sleep(struct mt792x_dev *dev, bool enable)
 {
 	char cmd[16];
 
 	snprintf(cmd, sizeof(cmd), "KeepFullPwr %d", !enable);
 
-	return mt7925_mcu_chip_config(dev, cmd);
+	return mt7927_mcu_chip_config(dev, cmd);
 }
-EXPORT_SYMBOL_GPL(mt7925_mcu_set_deep_sleep);
+EXPORT_SYMBOL_GPL(mt7927_mcu_set_deep_sleep);
 
-int mt7925_mcu_set_thermal_protect(struct mt792x_dev *dev)
+int mt7927_mcu_set_thermal_protect(struct mt792x_dev *dev)
 {
 	char cmd[64];
 	int ret = 0;
 
 	snprintf(cmd, sizeof(cmd), "ThermalProtGband %d %d %d %d %d %d %d %d %d %d",
 		 0, 100, 90, 80, 30, 1, 1, 115, 105, 5);
-	ret = mt7925_mcu_chip_config(dev, cmd);
+	ret = mt7927_mcu_chip_config(dev, cmd);
 
 	snprintf(cmd, sizeof(cmd), "ThermalProtAband %d %d %d %d %d %d %d %d %d %d",
 		 1, 100, 90, 80, 30, 1, 1, 115, 105, 5);
-	ret |= mt7925_mcu_chip_config(dev, cmd);
+	ret |= mt7927_mcu_chip_config(dev, cmd);
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(mt7925_mcu_set_thermal_protect);
+EXPORT_SYMBOL_GPL(mt7927_mcu_set_thermal_protect);
 
-int mt7925_run_firmware(struct mt792x_dev *dev)
+int mt7927_run_firmware(struct mt792x_dev *dev)
 {
+	u32 mcu_chipid, mcu_hw_rev;
 	int err;
 
 	err = mt792x_load_firmware(dev);
 	if (err)
 		return err;
 
-	err = mt7925_mcu_get_nic_capability(dev);
+	err = mt7927_mcu_get_nic_capability(dev);
 	if (err)
 		return err;
 
-	err = mt7925_load_clc(dev, mt792x_ram_name(dev));
+	err = mt7927_load_clc(dev, mt792x_ram_name(dev));
 	if (err)
 		return err;
+
+	mcu_chipid = MT_HW_CHIPID;
+	mcu_hw_rev = MT_HW_REV;
+	err = mt7927_mcu_regval(dev, MT_HW_CHIPID, &mcu_chipid, false);
+	if (!err)
+		err = mt7927_mcu_regval(dev, MT_HW_REV, &mcu_hw_rev, false);
+	if (!err && (mcu_chipid == 0x6639 || mcu_chipid == 0x7927))
+		dev->mt76.rev = (0x7927 << 16) | (mcu_hw_rev & 0xff);
+
 	set_bit(MT76_STATE_MCU_RUNNING, &dev->mphy.state);
 
-	return mt7925_mcu_fw_log_2_host(dev, 1);
+	return mt7927_mcu_fw_log_2_host(dev, 1);
 }
-EXPORT_SYMBOL_GPL(mt7925_run_firmware);
+EXPORT_SYMBOL_GPL(mt7927_run_firmware);
 
 static void
-mt7925_mcu_sta_hdr_trans_tlv(struct sk_buff *skb,
+mt7927_mcu_sta_hdr_trans_tlv(struct sk_buff *skb,
 			     struct ieee80211_vif *vif,
 			     struct mt792x_link_sta *mlink)
 {
@@ -1167,7 +1260,7 @@ mt7925_mcu_sta_hdr_trans_tlv(struct sk_buff *skb,
 	}
 }
 
-int mt7925_mcu_wtbl_update_hdr_trans(struct mt792x_dev *dev,
+int mt7927_mcu_wtbl_update_hdr_trans(struct mt792x_dev *dev,
 				     struct ieee80211_vif *vif,
 				     struct mt792x_bss_conf *mconf,
 				     struct mt792x_link_sta *mlink)
@@ -1176,16 +1269,16 @@ int mt7925_mcu_wtbl_update_hdr_trans(struct mt792x_dev *dev,
 
 	skb = __mt76_connac_mcu_alloc_sta_req(&dev->mt76, &mconf->mt76,
 					      &mlink->wcid,
-					      MT7925_STA_UPDATE_MAX_SIZE);
+					      MT7927_STA_UPDATE_MAX_SIZE);
 	if (IS_ERR(skb))
 		return PTR_ERR(skb);
 
-	mt7925_mcu_sta_hdr_trans_tlv(skb, vif, mlink);
+	mt7927_mcu_sta_hdr_trans_tlv(skb, vif, mlink);
 	return mt76_mcu_skb_send_msg(&dev->mt76, skb,
 				     MCU_WMWA_UNI_CMD(STA_REC_UPDATE), true);
 }
 
-int mt7925_mcu_set_tx(struct mt792x_dev *dev,
+int mt7927_mcu_set_tx(struct mt792x_dev *dev,
 		      struct ieee80211_bss_conf *bss_conf)
 {
 #define MCU_EDCA_AC_PARAM	0
@@ -1241,7 +1334,7 @@ int mt7925_mcu_set_tx(struct mt792x_dev *dev,
 }
 
 static int
-mt7925_mcu_sta_key_tlv(struct mt76_wcid *wcid,
+mt7927_mcu_sta_key_tlv(struct mt76_wcid *wcid,
 		       struct mt76_connac_sta_key_conf *sta_key_conf,
 		       struct sk_buff *skb,
 		       struct ieee80211_key_conf *key,
@@ -1289,7 +1382,7 @@ mt7925_mcu_sta_key_tlv(struct mt76_wcid *wcid,
 		u8 cipher;
 
 		sec->add = 1;
-		cipher = mt7925_mcu_get_cipher(key->cipher);
+		cipher = mt7927_mcu_get_cipher(key->cipher);
 		if (cipher == CONNAC3_CIPHER_NONE)
 			return -EOPNOTSUPP;
 
@@ -1324,7 +1417,7 @@ mt7925_mcu_sta_key_tlv(struct mt76_wcid *wcid,
 	return 0;
 }
 
-int mt7925_mcu_add_key(struct mt76_dev *dev, struct ieee80211_vif *vif,
+int mt7927_mcu_add_key(struct mt76_dev *dev, struct ieee80211_vif *vif,
 		       struct mt76_connac_sta_key_conf *sta_key_conf,
 		       struct ieee80211_key_conf *key, int mcu_cmd,
 		       struct mt76_wcid *wcid, enum set_key_cmd cmd,
@@ -1336,11 +1429,11 @@ int mt7925_mcu_add_key(struct mt76_dev *dev, struct ieee80211_vif *vif,
 	int ret;
 
 	skb = __mt76_connac_mcu_alloc_sta_req(dev, &mconf->mt76, wcid,
-					      MT7925_STA_UPDATE_MAX_SIZE);
+					      MT7927_STA_UPDATE_MAX_SIZE);
 	if (IS_ERR(skb))
 		return PTR_ERR(skb);
 
-	ret = mt7925_mcu_sta_key_tlv(wcid, sta_key_conf, skb, key, cmd, msta);
+	ret = mt7927_mcu_sta_key_tlv(wcid, sta_key_conf, skb, key, cmd, msta);
 	if (ret) {
 		dev_kfree_skb(skb);
 		return ret;
@@ -1349,7 +1442,7 @@ int mt7925_mcu_add_key(struct mt76_dev *dev, struct ieee80211_vif *vif,
 	return mt76_mcu_skb_send_msg(dev, skb, mcu_cmd, true);
 }
 
-int mt7925_mcu_set_mlo_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
+int mt7927_mcu_set_mlo_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 			   u16 sel_links, int duration, u8 token_id)
 {
 	struct mt792x_vif *mvif = mconf->vif;
@@ -1362,7 +1455,7 @@ int mt7925_mcu_set_mlo_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf
 		[NL80211_BAND_5GHZ] = 2,
 		[NL80211_BAND_6GHZ] = 3,
 	};
-	enum mt7925_roc_req type;
+	enum mt7927_roc_req type;
 	int center_ch, i = 0;
 	bool is_AG_band = false;
 	struct {
@@ -1411,12 +1504,12 @@ int mt7925_mcu_set_mlo_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf
 
 	if (!(wiphy->iftype_ext_capab[0].mld_capa_and_ops &
 	      IEEE80211_MLD_CAP_OP_MAX_SIMUL_LINKS))
-		type = is_AG_band ? MT7925_ROC_REQ_MLSR_AG :
-				    MT7925_ROC_REQ_MLSR_AA;
+		type = is_AG_band ? MT7927_ROC_REQ_MLSR_AG :
+				    MT7927_ROC_REQ_MLSR_AA;
 	else
-		type = MT7925_ROC_REQ_JOIN;
+		type = MT7927_ROC_REQ_JOIN;
 
-	for (i = 0; i < ARRAY_SIZE(links) && i < hweight16(vif->active_links); i++) {
+	for (i = 0; i < ARRAY_SIZE(links) && i < hweight16(sel_links); i++) {
 		if (WARN_ON_ONCE(!links[i].mconf || !links[i].chan))
 			continue;
 
@@ -1436,10 +1529,8 @@ int mt7925_mcu_set_mlo_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf
 		req.roc[i].center_chan2 = 0;
 		req.roc[i].center_chan2_from_ap = 0;
 
-		/* STR : 0xfe indicates BAND_ALL with enabling DBDC
-		 * EMLSR : 0xff indicates (BAND_AUTO) without DBDC
-		 */
-		req.roc[i].dbdcband = type == MT7925_ROC_REQ_JOIN ? 0xfe : 0xff;
+		/* STR join needs BAND_ALL/DBDC; EMLSR/sub-link remains auto. */
+		req.roc[i].dbdcband = type == MT7927_ROC_REQ_JOIN ? 0xfe : 0xff;
 
 		if (chan->hw_value < center_ch)
 			req.roc[i].sco = 1; /* SCA */
@@ -1453,9 +1544,9 @@ int mt7925_mcu_set_mlo_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf
 				 &req, sizeof(req), true);
 }
 
-int mt7925_mcu_set_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
+int mt7927_mcu_set_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 		       struct ieee80211_channel *chan, int duration,
-		       enum mt7925_roc_req type, u8 token_id)
+		       enum mt7927_roc_req type, u8 token_id)
 {
 	int center_ch = ieee80211_frequency_to_channel(chan->center_freq);
 	struct mt792x_dev *dev = phy->dev;
@@ -1477,7 +1568,7 @@ int mt7925_mcu_set_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 			.bw_from_ap = CMD_CBW_20MHZ,
 			.center_chan = center_ch,
 			.center_chan_from_ap = center_ch,
-			.dbdcband = 0xff, /* auto */
+			.dbdcband = mt7927_band_idx(chan->band),
 		},
 	};
 
@@ -1502,7 +1593,7 @@ int mt7925_mcu_set_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 				 &req, sizeof(req), true);
 }
 
-int mt7925_mcu_abort_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
+int mt7927_mcu_abort_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 			 u8 token_id)
 {
 	struct mt792x_dev *dev = phy->dev;
@@ -1524,7 +1615,8 @@ int mt7925_mcu_abort_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 			.len = cpu_to_le16(sizeof(struct roc_abort_tlv)),
 			.tokenid = token_id,
 			.bss_idx = mconf->mt76.idx,
-			.dbdcband = 0xff, /* auto*/
+			.dbdcband = mconf->mt76.band_idx <= 1 ?
+				    mconf->mt76.band_idx : 0xff,
 		},
 	};
 
@@ -1532,7 +1624,7 @@ int mt7925_mcu_abort_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 				 &req, sizeof(req), true);
 }
 
-int mt7925_mcu_set_eeprom(struct mt792x_dev *dev)
+int mt7927_mcu_set_eeprom(struct mt792x_dev *dev)
 {
 	struct {
 		u8 _rsv[4];
@@ -1552,9 +1644,9 @@ int mt7925_mcu_set_eeprom(struct mt792x_dev *dev)
 	return mt76_mcu_send_and_get_msg(&dev->mt76, MCU_UNI_CMD(EFUSE_CTRL),
 					 &req, sizeof(req), true, NULL);
 }
-EXPORT_SYMBOL_GPL(mt7925_mcu_set_eeprom);
+EXPORT_SYMBOL_GPL(mt7927_mcu_set_eeprom);
 
-int mt7925_mcu_uni_bss_ps(struct mt792x_dev *dev,
+int mt7927_mcu_uni_bss_ps(struct mt792x_dev *dev,
 			  struct ieee80211_bss_conf *link_conf)
 {
 	struct mt792x_bss_conf *mconf = mt792x_link_conf_to_mconf(link_conf);
@@ -1593,7 +1685,7 @@ int mt7925_mcu_uni_bss_ps(struct mt792x_dev *dev,
 }
 
 int
-mt7925_mcu_uni_bss_bcnft(struct mt792x_dev *dev,
+mt7927_mcu_uni_bss_bcnft(struct mt792x_dev *dev,
 			 struct ieee80211_bss_conf *link_conf, bool enable)
 {
 	struct mt792x_bss_conf *mconf = mt792x_link_conf_to_mconf(link_conf);
@@ -1631,7 +1723,7 @@ mt7925_mcu_uni_bss_bcnft(struct mt792x_dev *dev,
 }
 
 int
-mt7925_mcu_set_bss_pm(struct mt792x_dev *dev,
+mt7927_mcu_set_bss_pm(struct mt792x_dev *dev,
 		      struct ieee80211_bss_conf *link_conf,
 		      bool enable)
 {
@@ -1691,7 +1783,7 @@ mt7925_mcu_set_bss_pm(struct mt792x_dev *dev,
 }
 
 static void
-mt7925_mcu_sta_he_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
+mt7927_mcu_sta_he_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
 {
 	if (!link_sta->he_cap.has_he)
 		return;
@@ -1700,7 +1792,7 @@ mt7925_mcu_sta_he_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
 }
 
 static void
-mt7925_mcu_sta_he_6g_tlv(struct sk_buff *skb,
+mt7927_mcu_sta_he_6g_tlv(struct sk_buff *skb,
 			 struct ieee80211_link_sta *link_sta)
 {
 	struct sta_rec_he_6g_capa *he_6g;
@@ -1716,7 +1808,7 @@ mt7925_mcu_sta_he_6g_tlv(struct sk_buff *skb,
 }
 
 static void
-mt7925_mcu_sta_eht_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
+mt7927_mcu_sta_eht_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
 {
 	struct ieee80211_eht_mcs_nss_supp *mcs_map;
 	struct ieee80211_eht_cap_elem_fixed *elem;
@@ -1745,7 +1837,7 @@ mt7925_mcu_sta_eht_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
 }
 
 static void
-mt7925_mcu_sta_ht_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
+mt7927_mcu_sta_ht_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
 {
 	struct sta_rec_ht *ht;
 	struct tlv *tlv;
@@ -1760,7 +1852,7 @@ mt7925_mcu_sta_ht_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
 }
 
 static void
-mt7925_mcu_sta_vht_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
+mt7927_mcu_sta_vht_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
 {
 	struct sta_rec_vht *vht;
 	struct tlv *tlv;
@@ -1778,7 +1870,7 @@ mt7925_mcu_sta_vht_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
 }
 
 static void
-mt7925_mcu_sta_amsdu_tlv(struct sk_buff *skb,
+mt7927_mcu_sta_amsdu_tlv(struct sk_buff *skb,
 			 struct ieee80211_vif *vif,
 			 struct ieee80211_link_sta *link_sta,
 			 struct mt792x_link_sta *mlink)
@@ -1816,7 +1908,7 @@ mt7925_mcu_sta_amsdu_tlv(struct sk_buff *skb,
 }
 
 static void
-mt7925_mcu_sta_phy_tlv(struct sk_buff *skb,
+mt7927_mcu_sta_phy_tlv(struct sk_buff *skb,
 		       struct ieee80211_vif *vif,
 		       struct ieee80211_link_sta *link_sta)
 {
@@ -1864,7 +1956,7 @@ mt7925_mcu_sta_phy_tlv(struct sk_buff *skb,
 }
 
 static void
-mt7925_mcu_sta_state_v2_tlv(struct mt76_phy *mphy, struct sk_buff *skb,
+mt7927_mcu_sta_state_v2_tlv(struct mt76_phy *mphy, struct sk_buff *skb,
 			    struct ieee80211_link_sta *link_sta,
 			    struct ieee80211_vif *vif,
 			    u8 rcpi, u8 sta_state)
@@ -1893,7 +1985,7 @@ mt7925_mcu_sta_state_v2_tlv(struct mt76_phy *mphy, struct sk_buff *skb,
 }
 
 static void
-mt7925_mcu_sta_rate_ctrl_tlv(struct sk_buff *skb,
+mt7927_mcu_sta_rate_ctrl_tlv(struct sk_buff *skb,
 			     struct ieee80211_vif *vif,
 			     struct ieee80211_link_sta *link_sta)
 {
@@ -1931,7 +2023,7 @@ mt7925_mcu_sta_rate_ctrl_tlv(struct sk_buff *skb,
 }
 
 static void
-mt7925_mcu_sta_eht_mld_tlv(struct sk_buff *skb,
+mt7927_mcu_sta_eht_mld_tlv(struct sk_buff *skb,
 			   struct ieee80211_vif *vif, struct ieee80211_sta *sta)
 {
 	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
@@ -1967,7 +2059,7 @@ mt7925_mcu_sta_eht_mld_tlv(struct sk_buff *skb,
 }
 
 static void
-mt7925_mcu_sta_mld_tlv(struct sk_buff *skb,
+mt7927_mcu_sta_mld_tlv(struct sk_buff *skb,
 		       struct ieee80211_vif *vif,
 		       struct ieee80211_sta *sta,
 		       struct mt792x_bss_conf *mconf,
@@ -1991,7 +2083,7 @@ mt7925_mcu_sta_mld_tlv(struct sk_buff *skb,
 
 	if (!mconf_pri) {
 		dev_warn_ratelimited(dev->mt76.dev,
-				     "mt7925: MLD_TLV_LINK skip (no primary mconf) sta=%pM\n",
+				     "mt7927: MLD_TLV_LINK skip (no primary mconf) sta=%pM\n",
 			sta->addr);
 		return;
 	}
@@ -2018,7 +2110,7 @@ mt7925_mcu_sta_mld_tlv(struct sk_buff *skb,
 }
 
 static void
-mt7925_mcu_sta_remove_tlv(struct sk_buff *skb)
+mt7927_mcu_sta_remove_tlv(struct sk_buff *skb)
 {
 	struct sta_rec_remove *rem;
 	struct tlv *tlv;
@@ -2029,7 +2121,7 @@ mt7925_mcu_sta_remove_tlv(struct sk_buff *skb)
 }
 
 static int
-mt7925_mcu_sta_cmd(struct mt76_phy *phy,
+mt7927_mcu_sta_cmd(struct mt76_phy *phy,
 		   struct mt76_sta_cmd_info *info)
 {
 	struct mt792x_vif *mvif = (struct mt792x_vif *)info->vif->drv_priv;
@@ -2043,7 +2135,7 @@ mt7925_mcu_sta_cmd(struct mt76_phy *phy,
 	mlink = container_of(info->wcid, struct mt792x_link_sta, wcid);
 
 	skb = __mt76_connac_mcu_alloc_sta_req(dev, &mconf->mt76, info->wcid,
-					      MT7925_STA_UPDATE_MAX_SIZE);
+					      MT7927_STA_UPDATE_MAX_SIZE);
 	if (IS_ERR(skb))
 		return PTR_ERR(skb);
 
@@ -2054,44 +2146,44 @@ mt7925_mcu_sta_cmd(struct mt76_phy *phy,
 		mt76_connac_mcu_sta_basic_tlv(dev, skb, info->link_conf,
 					      info->link_sta,
 					      conn_state, info->newly);
-		mt7925_mcu_sta_phy_tlv(skb, info->vif, info->link_sta);
-		mt7925_mcu_sta_ht_tlv(skb, info->link_sta);
-		mt7925_mcu_sta_vht_tlv(skb, info->link_sta);
+		mt7927_mcu_sta_phy_tlv(skb, info->vif, info->link_sta);
+		mt7927_mcu_sta_ht_tlv(skb, info->link_sta);
+		mt7927_mcu_sta_vht_tlv(skb, info->link_sta);
 		mt76_connac_mcu_sta_uapsd(skb, info->vif, info->link_sta->sta);
-		mt7925_mcu_sta_amsdu_tlv(skb, info->vif, info->link_sta, mlink);
-		mt7925_mcu_sta_he_tlv(skb, info->link_sta);
-		mt7925_mcu_sta_he_6g_tlv(skb, info->link_sta);
-		mt7925_mcu_sta_eht_tlv(skb, info->link_sta);
-		mt7925_mcu_sta_rate_ctrl_tlv(skb, info->vif,
+		mt7927_mcu_sta_amsdu_tlv(skb, info->vif, info->link_sta, mlink);
+		mt7927_mcu_sta_he_tlv(skb, info->link_sta);
+		mt7927_mcu_sta_he_6g_tlv(skb, info->link_sta);
+		mt7927_mcu_sta_eht_tlv(skb, info->link_sta);
+		mt7927_mcu_sta_rate_ctrl_tlv(skb, info->vif,
 					     info->link_sta);
-		mt7925_mcu_sta_state_v2_tlv(phy, skb, info->link_sta,
+		mt7927_mcu_sta_state_v2_tlv(phy, skb, info->link_sta,
 					    info->vif, info->rcpi,
 					    info->state);
 
 		if (info->state != MT76_STA_INFO_STATE_NONE) {
-			mt7925_mcu_sta_mld_tlv(skb, info->vif,
+			mt7927_mcu_sta_mld_tlv(skb, info->vif,
 					       info->link_sta->sta,
 					       mconf, mlink);
 
-			mt7925_mcu_sta_eht_mld_tlv(skb, info->vif, info->link_sta->sta);
+			mt7927_mcu_sta_eht_mld_tlv(skb, info->vif, info->link_sta->sta);
 		}
 	}
 
 	if (!info->enable) {
-		mt7925_mcu_sta_remove_tlv(skb);
+		mt7927_mcu_sta_remove_tlv(skb);
 		mt76_connac_mcu_add_tlv(skb, STA_REC_MLD_OFF,
 					sizeof(struct tlv));
 	} else {
 		if (!info->link_sta)
 			mlink = &mvif->sta.deflink;
 
-		mt7925_mcu_sta_hdr_trans_tlv(skb, info->vif, mlink);
+		mt7927_mcu_sta_hdr_trans_tlv(skb, info->vif, mlink);
 	}
 
 	return mt76_mcu_skb_send_msg(dev, skb, info->cmd, true);
 }
 
-int mt7925_mcu_sta_update(struct mt792x_dev *dev,
+int mt7927_mcu_sta_update(struct mt792x_dev *dev,
 			  struct ieee80211_link_sta *link_sta,
 			  struct ieee80211_vif *vif,
 			  struct mt792x_link_sta *mlink,
@@ -2114,42 +2206,42 @@ int mt7925_mcu_sta_update(struct mt792x_dev *dev,
 	info.wcid = &mlink->wcid;
 	info.newly = state != MT76_STA_INFO_STATE_ASSOC;
 
-	return mt7925_mcu_sta_cmd(&dev->mphy, &info);
+	return mt7927_mcu_sta_cmd(&dev->mphy, &info);
 }
 
-int mt7925_mcu_set_beacon_filter(struct mt792x_dev *dev,
+int mt7927_mcu_set_beacon_filter(struct mt792x_dev *dev,
 				 struct ieee80211_vif *vif,
 				 bool enable)
 {
-#define MT7925_FIF_BIT_CLR		BIT(1)
-#define MT7925_FIF_BIT_SET		BIT(0)
+#define MT7927_FIF_BIT_CLR		BIT(1)
+#define MT7927_FIF_BIT_SET		BIT(0)
 	int err = 0;
 
 	if (enable) {
-		err = mt7925_mcu_uni_bss_bcnft(dev, &vif->bss_conf, true);
+		err = mt7927_mcu_uni_bss_bcnft(dev, &vif->bss_conf, true);
 		if (err < 0)
 			return err;
 
-		return mt7925_mcu_set_rxfilter(dev, 0,
-					       MT7925_FIF_BIT_SET,
+		return mt7927_mcu_set_rxfilter(dev, 0,
+					       MT7927_FIF_BIT_SET,
 					       MT_WF_RFCR_DROP_OTHER_BEACON);
 	}
 
-	err = mt7925_mcu_set_bss_pm(dev, &vif->bss_conf, false);
+	err = mt7927_mcu_set_bss_pm(dev, &vif->bss_conf, false);
 	if (err < 0)
 		return err;
 
-	return mt7925_mcu_set_rxfilter(dev, 0,
-				       MT7925_FIF_BIT_CLR,
+	return mt7927_mcu_set_rxfilter(dev, 0,
+				       MT7927_FIF_BIT_CLR,
 				       MT_WF_RFCR_DROP_OTHER_BEACON);
 }
 
-int mt7925_get_txpwr_info(struct mt792x_dev *dev, u8 band_idx, struct mt7925_txpwr *txpwr)
+int mt7927_get_txpwr_info(struct mt792x_dev *dev, u8 band_idx, struct mt7927_txpwr *txpwr)
 {
 #define TX_POWER_SHOW_INFO 0x7
 #define TXPOWER_ALL_RATE_POWER_INFO 0x2
-	struct mt7925_txpwr_event *event;
-	struct mt7925_txpwr_req req = {
+	struct mt7927_txpwr_event *event;
+	struct mt7927_txpwr_req req = {
 		.tag = cpu_to_le16(TX_POWER_SHOW_INFO),
 		.len = cpu_to_le16(sizeof(req) - 4),
 		.catg = TXPOWER_ALL_RATE_POWER_INFO,
@@ -2163,7 +2255,7 @@ int mt7925_get_txpwr_info(struct mt792x_dev *dev, u8 band_idx, struct mt7925_txp
 	if (ret)
 		return ret;
 
-	event = (struct mt7925_txpwr_event *)skb->data;
+	event = (struct mt7927_txpwr_event *)skb->data;
 	memcpy(txpwr, &event->txpwr, sizeof(event->txpwr));
 
 	dev_kfree_skb(skb);
@@ -2171,11 +2263,12 @@ int mt7925_get_txpwr_info(struct mt792x_dev *dev, u8 band_idx, struct mt7925_txp
 	return 0;
 }
 
-int mt7925_mcu_set_sniffer(struct mt792x_dev *dev, struct ieee80211_vif *vif,
+int mt7927_mcu_set_sniffer(struct mt792x_dev *dev, struct ieee80211_vif *vif,
 			   bool enable)
 {
 	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
 	struct ieee80211_chanctx_conf *ctx = mvif->bss_conf.mt76.ctx;
+	struct ieee80211_channel *chan;
 	struct {
 		struct {
 			u8 band_idx;
@@ -2188,9 +2281,6 @@ int mt7925_mcu_set_sniffer(struct mt792x_dev *dev, struct ieee80211_vif *vif,
 			u8 pad[3];
 		} __packed enable;
 	} __packed req = {
-		.hdr = {
-			.band_idx = 0,
-		},
 		.enable = {
 			.tag = cpu_to_le16(UNI_SNIFFER_ENABLE),
 			.len = cpu_to_le16(sizeof(struct sniffer_enable_tlv)),
@@ -2198,19 +2288,16 @@ int mt7925_mcu_set_sniffer(struct mt792x_dev *dev, struct ieee80211_vif *vif,
 		},
 	};
 
-	if (is_mt7927(&dev->mt76)) {
-		struct ieee80211_channel *chan;
+	chan = ctx ? ctx->def.chan : mvif->phy->mt76->chandef.chan;
 
-		chan = ctx ? ctx->def.chan : mvif->phy->mt76->chandef.chan;
-		if (chan)
-			req.hdr.band_idx = mt7927_band_idx(chan->band);
-	}
+	if (chan)
+		req.hdr.band_idx = mt7927_band_idx(chan->band);
 
 	return mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(SNIFFER), &req, sizeof(req),
 				 true);
 }
 
-int mt7925_mcu_config_sniffer(struct mt792x_vif *vif,
+int mt7927_mcu_config_sniffer(struct mt792x_vif *vif,
 			      struct ieee80211_chanctx_conf *ctx)
 {
 	struct mt76_phy *mphy = vif->phy->mt76;
@@ -2233,7 +2320,6 @@ int mt7925_mcu_config_sniffer(struct mt792x_vif *vif,
 		[NL80211_CHAN_WIDTH_10] = 5,
 		[NL80211_CHAN_WIDTH_320] = 6,
 	};
-
 	struct {
 		struct {
 			u8 band_idx;
@@ -2253,9 +2339,6 @@ int mt7925_mcu_config_sniffer(struct mt792x_vif *vif,
 			u8 pad[3];
 		} __packed tlv;
 	} __packed req = {
-		.hdr = {
-			.band_idx = 0,
-		},
 		.tlv = {
 			.tag = cpu_to_le16(UNI_SNIFFER_CONFIG),
 			.len = cpu_to_le16(sizeof(req.tlv)),
@@ -2265,11 +2348,11 @@ int mt7925_mcu_config_sniffer(struct mt792x_vif *vif,
 		},
 	};
 
-	if (is_mt7927(mphy->dev))
-		req.hdr.band_idx = mt7927_band_idx(chandef->chan->band);
+	req.hdr.band_idx = mt7927_band_idx(chandef->chan->band);
 
 	if (chandef->chan->band < ARRAY_SIZE(ch_band))
 		req.tlv.ch_band = ch_band[chandef->chan->band];
+
 	if (chandef->width < ARRAY_SIZE(ch_width))
 		req.tlv.bw = ch_width[chandef->width];
 
@@ -2286,7 +2369,7 @@ int mt7925_mcu_config_sniffer(struct mt792x_vif *vif,
 }
 
 int
-mt7925_mcu_uni_add_beacon_offload(struct mt792x_dev *dev,
+mt7927_mcu_uni_add_beacon_offload(struct mt792x_dev *dev,
 				  struct ieee80211_hw *hw,
 				  struct ieee80211_vif *vif,
 				  bool enable)
@@ -2371,7 +2454,7 @@ mt7925_mcu_uni_add_beacon_offload(struct mt792x_dev *dev,
 }
 
 static
-void mt7925_mcu_bss_rlm_tlv(struct sk_buff *skb, struct mt76_phy *phy,
+void mt7927_mcu_bss_rlm_tlv(struct sk_buff *skb, struct mt76_phy *phy,
 			    struct ieee80211_bss_conf *link_conf,
 			    struct ieee80211_chanctx_conf *ctx)
 {
@@ -2447,7 +2530,7 @@ void mt7925_mcu_bss_rlm_tlv(struct sk_buff *skb, struct mt76_phy *phy,
 }
 
 static struct sk_buff *
-__mt7925_mcu_alloc_bss_req(struct mt76_dev *dev, struct mt76_vif_link *mvif, int len)
+__mt7927_mcu_alloc_bss_req(struct mt76_dev *dev, struct mt76_vif_link *mvif, int len)
 {
 	struct bss_req_hdr hdr = {
 		.bss_idx = mvif->idx,
@@ -2464,7 +2547,7 @@ __mt7925_mcu_alloc_bss_req(struct mt76_dev *dev, struct mt76_vif_link *mvif, int
 }
 
 static
-void mt7925_mcu_bss_eht_tlv(struct sk_buff *skb, struct mt76_phy *phy,
+void mt7927_mcu_bss_eht_tlv(struct sk_buff *skb, struct mt76_phy *phy,
 			    struct ieee80211_bss_conf *link_conf,
 			    struct ieee80211_chanctx_conf *ctx)
 {
@@ -2480,42 +2563,42 @@ void mt7925_mcu_bss_eht_tlv(struct sk_buff *skb, struct mt76_phy *phy,
 	req->eht_dis_sub_chan_bitmap = cpu_to_le16(chandef->punctured);
 }
 
-int mt7925_mcu_set_eht_pp(struct mt76_phy *phy, struct mt76_vif_link *mvif,
+int mt7927_mcu_set_eht_pp(struct mt76_phy *phy, struct mt76_vif_link *mvif,
 			  struct ieee80211_bss_conf *link_conf,
 			  struct ieee80211_chanctx_conf *ctx)
 {
 	struct sk_buff *skb;
 
-	skb = __mt7925_mcu_alloc_bss_req(phy->dev, mvif,
-					 MT7925_BSS_UPDATE_MAX_SIZE);
+	skb = __mt7927_mcu_alloc_bss_req(phy->dev, mvif,
+					 MT7927_BSS_UPDATE_MAX_SIZE);
 	if (IS_ERR(skb))
 		return PTR_ERR(skb);
 
-	mt7925_mcu_bss_eht_tlv(skb, phy, link_conf, ctx);
+	mt7927_mcu_bss_eht_tlv(skb, phy, link_conf, ctx);
 
 	return mt76_mcu_skb_send_msg(phy->dev, skb,
 				     MCU_UNI_CMD(BSS_INFO_UPDATE), true);
 }
 
-int mt7925_mcu_set_chctx(struct mt76_phy *phy, struct mt76_vif_link *mvif,
+int mt7927_mcu_set_chctx(struct mt76_phy *phy, struct mt76_vif_link *mvif,
 			 struct ieee80211_bss_conf *link_conf,
 			 struct ieee80211_chanctx_conf *ctx)
 {
 	struct sk_buff *skb;
 
-	skb = __mt7925_mcu_alloc_bss_req(phy->dev, mvif,
-					 MT7925_BSS_UPDATE_MAX_SIZE);
+	skb = __mt7927_mcu_alloc_bss_req(phy->dev, mvif,
+					 MT7927_BSS_UPDATE_MAX_SIZE);
 	if (IS_ERR(skb))
 		return PTR_ERR(skb);
 
-	mt7925_mcu_bss_rlm_tlv(skb, phy, link_conf, ctx);
+	mt7927_mcu_bss_rlm_tlv(skb, phy, link_conf, ctx);
 
 	return mt76_mcu_skb_send_msg(phy->dev, skb,
 				     MCU_UNI_CMD(BSS_INFO_UPDATE), true);
 }
 
 static u8
-mt7925_get_phy_mode_ext(struct mt76_phy *phy, struct ieee80211_vif *vif,
+mt7927_get_phy_mode_ext(struct mt76_phy *phy, struct ieee80211_vif *vif,
 			enum nl80211_band band,
 			struct ieee80211_link_sta *link_sta)
 {
@@ -2561,7 +2644,7 @@ mt7925_get_phy_mode_ext(struct mt76_phy *phy, struct ieee80211_vif *vif,
 }
 
 static void
-mt7925_mcu_bss_basic_tlv(struct sk_buff *skb,
+mt7927_mcu_bss_basic_tlv(struct sk_buff *skb,
 			 struct ieee80211_bss_conf *link_conf,
 			 struct ieee80211_link_sta *link_sta,
 			 struct ieee80211_chanctx_conf *ctx,
@@ -2587,8 +2670,9 @@ mt7925_mcu_bss_basic_tlv(struct sk_buff *skb,
 						      mconf->mt76.omac_idx;
 	basic_req->hw_bss_idx = idx;
 
-	basic_req->phymode_ext = mt7925_get_phy_mode_ext(phy, vif, band,
+	basic_req->phymode_ext = mt7927_get_phy_mode_ext(phy, vif, band,
 							 link_sta);
+	mconf->mt76.band_idx = mt7927_band_idx(band);
 
 	if (band == NL80211_BAND_2GHZ)
 		basic_req->nonht_basic_phy = cpu_to_le16(PHY_TYPE_ERP_INDEX);
@@ -2636,7 +2720,7 @@ mt7925_mcu_bss_basic_tlv(struct sk_buff *skb,
 }
 
 static void
-mt7925_mcu_bss_sec_tlv(struct sk_buff *skb,
+mt7927_mcu_bss_sec_tlv(struct sk_buff *skb,
 		       struct ieee80211_bss_conf *link_conf)
 {
 	struct mt792x_bss_conf *mconf = mt792x_link_conf_to_mconf(link_conf);
@@ -2683,7 +2767,7 @@ mt7925_mcu_bss_sec_tlv(struct sk_buff *skb,
 }
 
 static void
-mt7925_mcu_bss_bmc_tlv(struct sk_buff *skb, struct mt792x_phy *phy,
+mt7927_mcu_bss_bmc_tlv(struct sk_buff *skb, struct mt792x_phy *phy,
 		       struct ieee80211_chanctx_conf *ctx,
 		       struct ieee80211_bss_conf *link_conf)
 {
@@ -2712,7 +2796,7 @@ mt7925_mcu_bss_bmc_tlv(struct sk_buff *skb, struct mt792x_phy *phy,
 }
 
 static void
-mt7925_mcu_bss_mld_tlv(struct sk_buff *skb,
+mt7927_mcu_bss_mld_tlv(struct sk_buff *skb,
 		       struct ieee80211_bss_conf *link_conf)
 {
 	struct ieee80211_vif *vif = link_conf->vif;
@@ -2746,7 +2830,7 @@ mt7925_mcu_bss_mld_tlv(struct sk_buff *skb,
 }
 
 static void
-mt7925_mcu_bss_qos_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_conf)
+mt7927_mcu_bss_qos_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_conf)
 {
 	struct mt76_connac_bss_qos_tlv *qos;
 	struct tlv *tlv;
@@ -2757,7 +2841,7 @@ mt7925_mcu_bss_qos_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_conf
 }
 
 static void
-mt7925_mcu_bss_mbssid_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_conf,
+mt7927_mcu_bss_mbssid_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_conf,
 			  bool enable)
 {
 	struct bss_info_uni_mbssid *mbssid;
@@ -2776,7 +2860,7 @@ mt7925_mcu_bss_mbssid_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_c
 }
 
 static void
-mt7925_mcu_bss_he_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_conf,
+mt7927_mcu_bss_he_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_conf,
 		      struct mt792x_phy *phy)
 {
 #define DEFAULT_HE_PE_DURATION		4
@@ -2804,7 +2888,7 @@ mt7925_mcu_bss_he_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_conf,
 }
 
 static void
-mt7925_mcu_bss_color_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_conf,
+mt7927_mcu_bss_color_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_conf,
 			 bool enable)
 {
 	struct bss_info_uni_bss_color *color;
@@ -2820,7 +2904,7 @@ mt7925_mcu_bss_color_tlv(struct sk_buff *skb, struct ieee80211_bss_conf *link_co
 }
 
 static void
-mt7925_mcu_bss_ifs_tlv(struct sk_buff *skb,
+mt7927_mcu_bss_ifs_tlv(struct sk_buff *skb,
 		       struct ieee80211_bss_conf *link_conf)
 {
 	struct mt792x_vif *mvif = (struct mt792x_vif *)link_conf->vif->drv_priv;
@@ -2834,25 +2918,25 @@ mt7925_mcu_bss_ifs_tlv(struct sk_buff *skb,
 	ifs_time->slot_time = cpu_to_le16(phy->slottime);
 }
 
-int mt7925_mcu_set_timing(struct mt792x_phy *phy,
+int mt7927_mcu_set_timing(struct mt792x_phy *phy,
 			  struct ieee80211_bss_conf *link_conf)
 {
 	struct mt792x_bss_conf *mconf = mt792x_link_conf_to_mconf(link_conf);
 	struct mt792x_dev *dev = phy->dev;
 	struct sk_buff *skb;
 
-	skb = __mt7925_mcu_alloc_bss_req(&dev->mt76, &mconf->mt76,
-					 MT7925_BSS_UPDATE_MAX_SIZE);
+	skb = __mt7927_mcu_alloc_bss_req(&dev->mt76, &mconf->mt76,
+					 MT7927_BSS_UPDATE_MAX_SIZE);
 	if (IS_ERR(skb))
 		return PTR_ERR(skb);
 
-	mt7925_mcu_bss_ifs_tlv(skb, link_conf);
+	mt7927_mcu_bss_ifs_tlv(skb, link_conf);
 
 	return mt76_mcu_skb_send_msg(&dev->mt76, skb,
 				     MCU_UNI_CMD(BSS_INFO_UPDATE), true);
 }
 
-void mt7925_mcu_del_dev(struct mt76_dev *mdev,
+void mt7927_mcu_del_dev(struct mt76_dev *mdev,
 			struct ieee80211_vif *vif)
 {
 	struct mt76_vif_link *mvif = (struct mt76_vif_link *)vif->drv_priv;
@@ -2908,7 +2992,7 @@ void mt7925_mcu_del_dev(struct mt76_dev *mdev,
 			  &dev_req, sizeof(dev_req), true);
 }
 
-int mt7925_mcu_add_bss_info_sta(struct mt792x_phy *phy,
+int mt7927_mcu_add_bss_info_sta(struct mt792x_phy *phy,
 				struct ieee80211_chanctx_conf *ctx,
 				struct ieee80211_bss_conf *link_conf,
 				struct ieee80211_link_sta *link_sta,
@@ -2921,28 +3005,28 @@ int mt7925_mcu_add_bss_info_sta(struct mt792x_phy *phy,
 	struct sk_buff *skb;
 	int err;
 
-	skb = __mt7925_mcu_alloc_bss_req(&dev->mt76, &mconf->mt76,
-					 MT7925_BSS_UPDATE_MAX_SIZE);
+	skb = __mt7927_mcu_alloc_bss_req(&dev->mt76, &mconf->mt76,
+					 MT7927_BSS_UPDATE_MAX_SIZE);
 	if (IS_ERR(skb))
 		return PTR_ERR(skb);
 
 	/* bss_basic must be first */
-	mt7925_mcu_bss_basic_tlv(skb, link_conf, link_sta, ctx, phy->mt76,
+	mt7927_mcu_bss_basic_tlv(skb, link_conf, link_sta, ctx, phy->mt76,
 				 bmc_tx_wlan_idx, sta_wlan_idx, enable);
-	mt7925_mcu_bss_sec_tlv(skb, link_conf);
-	mt7925_mcu_bss_bmc_tlv(skb, phy, ctx, link_conf);
-	mt7925_mcu_bss_qos_tlv(skb, link_conf);
-	mt7925_mcu_bss_mld_tlv(skb, link_conf);
-	mt7925_mcu_bss_ifs_tlv(skb, link_conf);
+	mt7927_mcu_bss_sec_tlv(skb, link_conf);
+	mt7927_mcu_bss_bmc_tlv(skb, phy, ctx, link_conf);
+	mt7927_mcu_bss_qos_tlv(skb, link_conf);
+	mt7927_mcu_bss_mld_tlv(skb, link_conf);
+	mt7927_mcu_bss_ifs_tlv(skb, link_conf);
 
 	if (link_conf->he_support) {
-		mt7925_mcu_bss_he_tlv(skb, link_conf, phy);
-		mt7925_mcu_bss_color_tlv(skb, link_conf, enable);
+		mt7927_mcu_bss_he_tlv(skb, link_conf, phy);
+		mt7927_mcu_bss_color_tlv(skb, link_conf, enable);
 	}
 
 	if (enable) {
-		mt7925_mcu_bss_rlm_tlv(skb, phy->mt76, link_conf, ctx);
-		mt7925_mcu_bss_mbssid_tlv(skb, link_conf, enable);
+		mt7927_mcu_bss_rlm_tlv(skb, phy->mt76, link_conf, ctx);
+		mt7927_mcu_bss_mbssid_tlv(skb, link_conf, enable);
 	}
 
 	err = mt76_mcu_skb_send_msg(&dev->mt76, skb,
@@ -2950,7 +3034,7 @@ int mt7925_mcu_add_bss_info_sta(struct mt792x_phy *phy,
 	return mt76_connac_mcu_bss_deact_err(&dev->mt76, err, enable);
 }
 
-int mt7925_mcu_add_bss_info(struct mt792x_phy *phy,
+int mt7927_mcu_add_bss_info(struct mt792x_phy *phy,
 			    struct ieee80211_chanctx_conf *ctx,
 			    struct ieee80211_bss_conf *link_conf,
 			    struct ieee80211_link_sta *link_sta,
@@ -2973,11 +3057,11 @@ int mt7925_mcu_add_bss_info(struct mt792x_phy *phy,
 		mlink = &mconf->vif->sta.deflink;
 	}
 
-	return mt7925_mcu_add_bss_info_sta(phy, ctx, link_conf, link_sta,
+	return mt7927_mcu_add_bss_info_sta(phy, ctx, link_conf, link_sta,
 					   mlink_bc->wcid.idx, mlink->wcid.idx, enable);
 }
 
-int mt7925_mcu_set_dbdc(struct mt76_phy *phy, bool enable)
+int mt7927_mcu_set_dbdc(struct mt76_phy *phy, bool enable)
 {
 	struct mt76_dev *mdev = phy->dev;
 
@@ -3005,10 +3089,10 @@ int mt7925_mcu_set_dbdc(struct mt76_phy *phy, bool enable)
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(mt7925_mcu_set_dbdc);
+EXPORT_SYMBOL_GPL(mt7927_mcu_set_dbdc);
 
 static void
-mt7925_mcu_build_scan_ie_tlv(struct mt76_dev *mdev,
+mt7927_mcu_build_scan_ie_tlv(struct mt76_dev *mdev,
 			     struct sk_buff *skb,
 			     struct ieee80211_scan_ies *scan_ies)
 {
@@ -3055,7 +3139,7 @@ mt7925_mcu_build_scan_ie_tlv(struct mt76_dev *mdev,
 	}
 }
 
-int mt7925_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
+int mt7927_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
 		       struct ieee80211_scan_request *scan_req)
 {
 	struct mt76_vif_link *mvif = (struct mt76_vif_link *)vif->drv_priv;
@@ -3065,7 +3149,7 @@ int mt7925_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
 	struct mt76_dev *mdev = phy->dev;
 	struct mt76_connac_mcu_scan_channel *chan;
 	struct sk_buff *skb;
-	u32 short_ssid[MT7925_RNR_SCAN_MAX_BSSIDS] = {};
+	u32 short_ssid[MT7927_RNR_SCAN_MAX_BSSIDS] = {};
 
 	struct scan_hdr_tlv *hdr;
 	struct scan_req_tlv *req;
@@ -3081,7 +3165,7 @@ int mt7925_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
 		return -EBUSY;
 
 	max_len = sizeof(*hdr) + sizeof(*req) + sizeof(*ssid) +
-		  sizeof(*bssid) * MT7925_RNR_SCAN_MAX_BSSIDS +
+		  sizeof(*bssid) * MT7927_RNR_SCAN_MAX_BSSIDS +
 		  sizeof(*chan_info) + sizeof(*misc) + sizeof(*ie) +
 		  MT76_CONNAC_SCAN_IE_LEN;
 
@@ -3106,7 +3190,7 @@ int mt7925_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
 	for (i = 0; i < sreq->n_ssids; i++) {
 		if (!sreq->ssids[i].ssid_len)
 			continue;
-		if (i >= MT7925_RNR_SCAN_MAX_BSSIDS)
+		if (i >= MT7927_RNR_SCAN_MAX_BSSIDS)
 			break;
 
 		short_ssid[n_ssids] = ~crc32_le(~0, sreq->ssids[i].ssid,
@@ -3125,7 +3209,7 @@ int mt7925_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
 		mt76_connac_mcu_build_rnr_scan_param(mdev, sreq);
 
 		for (j = 0; j < mdev->rnr.bssid_num; j++) {
-			if (j >= MT7925_RNR_SCAN_MAX_BSSIDS)
+			if (j >= MT7927_RNR_SCAN_MAX_BSSIDS)
 				break;
 
 			tlv = mt76_connac_mcu_add_tlv(skb, UNI_SCAN_BSSID,
@@ -3134,8 +3218,8 @@ int mt7925_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
 
 			ether_addr_copy(bssid->bssid, mdev->rnr.bssid[j]);
 			bssid->match_ch = mdev->rnr.channel[j];
-			bssid->match_ssid_ind = MT7925_RNR_SCAN_MAX_BSSIDS;
-			bssid->match_short_ssid_ind = MT7925_RNR_SCAN_MAX_BSSIDS;
+			bssid->match_ssid_ind = MT7927_RNR_SCAN_MAX_BSSIDS;
+			bssid->match_short_ssid_ind = MT7927_RNR_SCAN_MAX_BSSIDS;
 		}
 		req->scan_func |= SCAN_FUNC_RNR_SCAN;
 	} else {
@@ -3178,7 +3262,7 @@ int mt7925_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
 	}
 
 	/* Append scan probe IEs as the last tlv */
-	mt7925_mcu_build_scan_ie_tlv(mdev, skb, &scan_req->ies);
+	mt7927_mcu_build_scan_ie_tlv(mdev, skb, &scan_req->ies);
 
 	err = mt76_mcu_skb_send_msg(mdev, skb, MCU_UNI_CMD(SCAN_REQ),
 				    true);
@@ -3187,9 +3271,9 @@ int mt7925_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(mt7925_mcu_hw_scan);
+EXPORT_SYMBOL_GPL(mt7927_mcu_hw_scan);
 
-int mt7925_mcu_sched_scan_req(struct mt76_phy *phy,
+int mt7927_mcu_sched_scan_req(struct mt76_phy *phy,
 			      struct ieee80211_vif *vif,
 			      struct cfg80211_sched_scan_request *sreq,
 			      struct ieee80211_scan_ies *ies)
@@ -3281,15 +3365,15 @@ int mt7925_mcu_sched_scan_req(struct mt76_phy *phy,
 	chan_info->channel_type = sreq->n_channels ? 4 : 0;
 
 	/* Append scan probe IEs as the last tlv */
-	mt7925_mcu_build_scan_ie_tlv(mdev, skb, ies);
+	mt7927_mcu_build_scan_ie_tlv(mdev, skb, ies);
 
 	return mt76_mcu_skb_send_msg(mdev, skb, MCU_UNI_CMD(SCAN_REQ),
 				     true);
 }
-EXPORT_SYMBOL_GPL(mt7925_mcu_sched_scan_req);
+EXPORT_SYMBOL_GPL(mt7927_mcu_sched_scan_req);
 
 int
-mt7925_mcu_sched_scan_enable(struct mt76_phy *phy,
+mt7927_mcu_sched_scan_enable(struct mt76_phy *phy,
 			     struct ieee80211_vif *vif,
 			     bool enable)
 {
@@ -3323,7 +3407,7 @@ mt7925_mcu_sched_scan_enable(struct mt76_phy *phy,
 				     true);
 }
 
-int mt7925_mcu_cancel_hw_scan(struct mt76_phy *phy,
+int mt7927_mcu_cancel_hw_scan(struct mt76_phy *phy,
 			      struct ieee80211_vif *vif)
 {
 	struct mt76_vif_link *mvif = (struct mt76_vif_link *)vif->drv_priv;
@@ -3361,9 +3445,9 @@ int mt7925_mcu_cancel_hw_scan(struct mt76_phy *phy,
 	return mt76_mcu_send_msg(phy->dev, MCU_UNI_CMD(SCAN_REQ),
 				 &req, sizeof(req), true);
 }
-EXPORT_SYMBOL_GPL(mt7925_mcu_cancel_hw_scan);
+EXPORT_SYMBOL_GPL(mt7927_mcu_cancel_hw_scan);
 
-int mt7925_mcu_set_channel_domain(struct mt76_phy *phy)
+int mt7927_mcu_set_channel_domain(struct mt76_phy *phy)
 {
 	int len, i, n_max_channels, n_2ch = 0, n_5ch = 0, n_6ch = 0;
 	struct {
@@ -3466,14 +3550,14 @@ int mt7925_mcu_set_channel_domain(struct mt76_phy *phy)
 	return mt76_mcu_skb_send_msg(dev, skb, MCU_UNI_CMD(SET_DOMAIN_INFO),
 				     true);
 }
-EXPORT_SYMBOL_GPL(mt7925_mcu_set_channel_domain);
+EXPORT_SYMBOL_GPL(mt7927_mcu_set_channel_domain);
 
 static int
-__mt7925_mcu_set_clc(struct mt792x_dev *dev, u8 *alpha2,
+__mt7927_mcu_set_clc(struct mt792x_dev *dev, u8 *alpha2,
 		     enum environment_cap env_cap,
-		     struct mt7925_clc *clc, u8 idx)
+		     struct mt7927_clc *clc, u8 idx)
 {
-	struct mt7925_clc_segment *seg;
+	struct mt7927_clc_segment *seg;
 	struct sk_buff *skb;
 	struct {
 		u8 rsv[4];
@@ -3506,14 +3590,14 @@ __mt7925_mcu_set_clc(struct mt792x_dev *dev, u8 *alpha2,
 	pos = clc->data + sizeof(*seg) * clc->t0.nr_seg;
 	last_pos = clc->data + le32_to_cpu(*(__le32 *)(clc->data + 4));
 	while (pos < last_pos) {
-		struct mt7925_clc_rule *rule = (struct mt7925_clc_rule *)pos;
+		struct mt7927_clc_rule *rule = (struct mt7927_clc_rule *)pos;
 
 		pos += sizeof(*rule);
 		if (rule->alpha2[0] != alpha2[0] ||
 		    rule->alpha2[1] != alpha2[1])
 			continue;
 
-		seg = (struct mt7925_clc_segment *)clc->data
+		seg = (struct mt7927_clc_segment *)clc->data
 			  + rule->seg_idx - 1;
 
 		memcpy(req.alpha2, rule->alpha2, 2);
@@ -3545,7 +3629,7 @@ __mt7925_mcu_set_clc(struct mt792x_dev *dev, u8 *alpha2,
 	return 0;
 }
 
-int mt7925_mcu_set_clc(struct mt792x_dev *dev, u8 *alpha2,
+int mt7927_mcu_set_clc(struct mt792x_dev *dev, u8 *alpha2,
 		       enum environment_cap env_cap)
 {
 	struct mt792x_phy *phy = (struct mt792x_phy *)&dev->phy;
@@ -3559,12 +3643,12 @@ int mt7925_mcu_set_clc(struct mt792x_dev *dev, u8 *alpha2,
 		if (i == MT792x_CLC_BE_CTRL)
 			continue;
 
-		ret = __mt7925_mcu_set_clc(dev, alpha2, env_cap,
+		ret = __mt7927_mcu_set_clc(dev, alpha2, env_cap,
 					   phy->clc[i], i);
 
 		/* If no country found, set "00" as default */
 		if (ret == -ENOENT)
-			ret = __mt7925_mcu_set_clc(dev, "00",
+			ret = __mt7927_mcu_set_clc(dev, "00",
 						   ENVIRON_INDOOR,
 						   phy->clc[i], i);
 		if (ret < 0)
@@ -3573,7 +3657,7 @@ int mt7925_mcu_set_clc(struct mt792x_dev *dev, u8 *alpha2,
 	return 0;
 }
 
-int mt7925_mcu_fill_message(struct mt76_dev *mdev, struct sk_buff *skb,
+int mt7927_mcu_fill_message(struct mt76_dev *mdev, struct sk_buff *skb,
 			    int cmd, int *wait_seq)
 {
 	int txd_len, mcu_cmd = FIELD_GET(__MCU_CMD_FIELD_ID, cmd);
@@ -3662,9 +3746,9 @@ exit:
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(mt7925_mcu_fill_message);
+EXPORT_SYMBOL_GPL(mt7927_mcu_fill_message);
 
-int mt7925_mcu_set_rts_thresh(struct mt792x_phy *phy, u32 val)
+int mt7927_mcu_set_rts_thresh(struct mt792x_phy *phy, u32 val)
 {
 	struct {
 		u8 band_idx;
@@ -3686,7 +3770,7 @@ int mt7925_mcu_set_rts_thresh(struct mt792x_phy *phy, u32 val)
 				 &req, sizeof(req), true);
 }
 
-int mt7925_mcu_set_radio_en(struct mt792x_phy *phy, bool enable)
+int mt7927_mcu_set_radio_en(struct mt792x_phy *phy, bool enable)
 {
 	struct {
 		u8 band_idx;
@@ -3708,7 +3792,7 @@ int mt7925_mcu_set_radio_en(struct mt792x_phy *phy, bool enable)
 }
 
 static void
-mt7925_mcu_build_sku(struct mt76_dev *dev, s8 *sku,
+mt7927_mcu_build_sku(struct mt76_dev *dev, s8 *sku,
 		     struct mt76_power_limits *limits,
 		     enum nl80211_band band)
 {
@@ -3753,7 +3837,7 @@ mt7925_mcu_build_sku(struct mt76_dev *dev, s8 *sku,
 }
 
 static int
-mt7925_mcu_rate_txpower_band(struct mt76_phy *phy,
+mt7927_mcu_rate_txpower_band(struct mt76_phy *phy,
 			     enum nl80211_band band)
 {
 	int tx_power, n_chan, last_ch, err = 0, idx = 0;
@@ -3791,7 +3875,7 @@ mt7925_mcu_rate_txpower_band(struct mt76_phy *phy,
 		225, 227, 229, 233
 	};
 	struct mt76_power_limits *limits;
-	struct mt7925_sku_tlv *sku_tlbv;
+	struct mt7927_sku_tlv *sku_tlbv;
 	const u8 *ch_list;
 
 	sku_len = sizeof(*sku_tlbv);
@@ -3825,7 +3909,7 @@ mt7925_mcu_rate_txpower_band(struct mt76_phy *phy,
 	}
 
 	for (i = 0; i < batch_size; i++) {
-		struct mt7925_tx_power_limit_tlv *tx_power_tlv;
+		struct mt7927_tx_power_limit_tlv *tx_power_tlv;
 		int j, msg_len, num_ch;
 		struct sk_buff *skb;
 
@@ -3837,7 +3921,7 @@ mt7925_mcu_rate_txpower_band(struct mt76_phy *phy,
 			goto out;
 		}
 
-		tx_power_tlv = (struct mt7925_tx_power_limit_tlv *)
+		tx_power_tlv = (struct mt7927_tx_power_limit_tlv *)
 			       skb_put(skb, sizeof(*tx_power_tlv));
 
 		BUILD_BUG_ON(sizeof(dev->alpha2) > sizeof(tx_power_tlv->alpha2));
@@ -3875,7 +3959,7 @@ mt7925_mcu_rate_txpower_band(struct mt76_phy *phy,
 			tx_power_tlv->last_msg = ch_list[idx] == last_ch;
 			sku_tlbv->channel = ch_list[idx];
 
-			mt7925_mcu_build_sku(dev, sku_tlbv->pwr_limit,
+			mt7927_mcu_build_sku(dev, sku_tlbv->pwr_limit,
 					     limits, band);
 			skb_put_data(skb, sku_tlbv, sku_len);
 		}
@@ -3892,28 +3976,28 @@ out:
 	return err;
 }
 
-int mt7925_mcu_set_rate_txpower(struct mt76_phy *phy)
+int mt7927_mcu_set_rate_txpower(struct mt76_phy *phy)
 {
 	struct mt76_dev *mdev = phy->dev;
 	struct mt792x_dev *dev = mt792x_hw_dev(mdev->hw);
 	int err;
 
 	if (phy->cap.has_2ghz) {
-		err = mt7925_mcu_rate_txpower_band(phy,
+		err = mt7927_mcu_rate_txpower_band(phy,
 						   NL80211_BAND_2GHZ);
 		if (err < 0)
 			return err;
 	}
 
 	if (phy->cap.has_5ghz) {
-		err = mt7925_mcu_rate_txpower_band(phy,
+		err = mt7927_mcu_rate_txpower_band(phy,
 						   NL80211_BAND_5GHZ);
 		if (err < 0)
 			return err;
 	}
 
 	if (phy->cap.has_6ghz && dev->phy.clc_chan_conf) {
-		err = mt7925_mcu_rate_txpower_band(phy,
+		err = mt7927_mcu_rate_txpower_band(phy,
 						   NL80211_BAND_6GHZ);
 		if (err < 0)
 			return err;
@@ -3922,7 +4006,7 @@ int mt7925_mcu_set_rate_txpower(struct mt76_phy *phy)
 	return 0;
 }
 
-int mt7925_mcu_wf_rf_pin_ctrl(struct mt792x_phy *phy)
+int mt7927_mcu_wf_rf_pin_ctrl(struct mt792x_phy *phy)
 {
 #define UNI_CMD_RADIO_STATUS_GET	0
 	struct mt792x_dev *dev = phy->dev;
@@ -3936,7 +4020,7 @@ int mt7925_mcu_wf_rf_pin_ctrl(struct mt792x_phy *phy)
 		.tag = UNI_CMD_RADIO_STATUS_GET,
 		.len = cpu_to_le16(sizeof(req)),
 	};
-	struct mt7925_radio_status_event {
+	struct mt7927_radio_status_event {
 		__le16 tag;
 		__le16 len;
 
@@ -3951,7 +4035,7 @@ int mt7925_mcu_wf_rf_pin_ctrl(struct mt792x_phy *phy)
 		return ret;
 
 	skb_pull(skb, sizeof(struct tlv));
-	status = (struct mt7925_radio_status_event *)skb->data;
+	status = (struct mt7927_radio_status_event *)skb->data;
 	ret = status->data;
 
 	dev_kfree_skb(skb);
@@ -3959,7 +4043,7 @@ int mt7925_mcu_wf_rf_pin_ctrl(struct mt792x_phy *phy)
 	return ret;
 }
 
-int mt7925_mcu_set_rxfilter(struct mt792x_dev *dev, u32 fif,
+int mt7927_mcu_set_rxfilter(struct mt792x_dev *dev, u32 fif,
 			    u8 bit_op, u32 bit_map)
 {
 	struct mt792x_phy *phy = &dev->phy;
@@ -3990,7 +4074,7 @@ int mt7925_mcu_set_rxfilter(struct mt792x_dev *dev, u32 fif,
 				 &req, sizeof(req), true);
 }
 
-int mt7925_mcu_set_rssimonitor(struct mt792x_dev *dev, struct ieee80211_vif *vif)
+int mt7927_mcu_set_rssimonitor(struct mt792x_dev *dev, struct ieee80211_vif *vif)
 {
 	struct mt792x_bss_conf *mconf = mt792x_link_conf_to_mconf(&vif->bss_conf);
 	struct {

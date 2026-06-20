@@ -92,6 +92,7 @@ obj-m += mt7615/
 #obj-m += mt7915/
 obj-m += mt7921/
 obj-m += mt7925/
+obj-m += mt7927/
 #obj-m += mt7996/
 obj-m += mt76x0/
 obj-m += mt76x2/
@@ -107,11 +108,12 @@ KDIR ?= /lib/modules/$(KVER)/build
 MODDIR ?= /lib/modules/$(KVER)/extra/mt76
 FWDIR := /lib/firmware/mediatek
 NPROC ?= $(shell nproc --ignore=1)
+KBUILD_JOBS = $(if $(findstring -j,$(MAKEFLAGS)),,-j$(NPROC))
 
 .PHONY: modules clean install install_fw uninstall cleanup_target_system
 
 modules:
-	$(MAKE) -j$(NPROC) -C $(KDIR) M=$$PWD modules
+	$(MAKE) $(KBUILD_JOBS) -C $(KDIR) M=$$PWD modules
 
 clean:
 	$(MAKE) -C $(KDIR) M=$$PWD clean
@@ -151,7 +153,7 @@ install:
 		zstd -fq --rm $(MODDIR)/*.ko 2>/dev/null || true; \
 	elif ls /lib/modules/$(KVER)/kernel/net/wireless/*.ko.xz >/dev/null 2>&1; then \
 		echo "Compressing modules with xz (matching distro scheme)..."; \
-		xz -f $(MODDIR)/*.ko 2>/dev/null || true; \
+		xz -f -C crc32 $(MODDIR)/*.ko 2>/dev/null || true; \
 	elif ls /lib/modules/$(KVER)/kernel/net/wireless/*.ko.gz >/dev/null 2>&1; then \
 		echo "Compressing modules with gzip (matching distro scheme)..."; \
 		gzip -f $(MODDIR)/*.ko 2>/dev/null || true; \

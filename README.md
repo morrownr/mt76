@@ -38,6 +38,7 @@ sudo sh uninstall-driver.sh
 | MT7615 | MT7615, MT7663 | PCIe, USB, SDIO | mt7615e, mt7663u, mt7663s | WiFi 5 (AC) |
 | MT7921 | MT7920, MT7921, MT7922, **MT7902** | PCIe, USB, SDIO | mt7921e, mt7921u, mt7921s | WiFi 6E (AXE) |
 | MT7925 | MT7925 | PCIe, USB | mt7925e, mt7925u | WiFi 7 (BE) |
+| MT7927 | MT7927 / MT6639 | PCIe | mt7927e | WiFi 7 (BE) |
 
 ### Inactive Families
 
@@ -72,6 +73,7 @@ The drivers auto-bind to many vendor PCI IDs per family; run `lspci -nn` and loo
 | MT7615 | 7615, 7663, 7611 |
 | MT7921 | 7961, 7922, 0608, 0616, 7920, 7902 (also 0b48:7922) |
 | MT7925 | 7925, 0717 |
+| MT7927 | 0717, 0738, 6639, 7927 |
 
 ## Files
 
@@ -90,6 +92,7 @@ The drivers auto-bind to many vendor PCI IDs per family; run `lspci -nn` and loo
 | `mt7915/Makefile` | MT7915 PCIe with coredump support (WiFi 6) |
 | `mt7921/Makefile` | MT7921 family: common + PCIe + USB + SDIO (WiFi 6E) |
 | `mt7925/Makefile` | MT7925 family: common + PCIe + USB (WiFi 7) |
+| `mt7927/Makefile` | MT7927 family: common + PCIe (WiFi 7) |
 | `mt7996/Makefile` | MT7996 PCIe with NPU and coredump support (WiFi 7) |
 | `mt76x0/Makefile` | MT76x0 family: common + USB + PCIe (WiFi 5) |
 | `mt76x2/Makefile` | MT76x2 family: common + USB + PCIe (WiFi 5) |
@@ -123,6 +126,8 @@ Chipset families:
   mt7925_common_git     MT7925 shared
   mt7925e_git           MT7925 PCIe
   mt7925u_git           MT7925 USB
+  mt7927_common_git     MT7927 shared
+  mt7927e_git           MT7927 PCIe
   mt7996e_git           MT7996 PCIe
   mt76x0_common_git     MT76x0 shared
   mt76x0u_git           MT76x0 USB
