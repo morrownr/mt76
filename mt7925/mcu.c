@@ -1055,6 +1055,9 @@ mt7925_mcu_get_nic_capability(struct mt792x_dev *dev)
 		}
 		skb_pull(skb, len);
 	}
+
+	if (is_mt7927(&dev->mt76))
+		dev->phy.chip_cap |= MT792x_CHIP_CAP_MLO_EN;
 out:
 	dev_kfree_skb(skb);
 	return ret;
@@ -2722,12 +2725,9 @@ mt7925_mcu_bss_mld_tlv(struct sk_buff *skb,
 	mld->own_mld_id = mconf->mt76.idx + 32;
 	mld->remap_idx = 0xff;
 
-	if (phy->chip_cap & MT792x_CHIP_CAP_MLO_EML_EN) {
-		mld->eml_enable = !!(link_conf->vif->cfg.eml_cap &
-				     IEEE80211_EML_CAP_EMLSR_SUPP);
-	} else {
-		mld->eml_enable = 0;
-	}
+	mld->eml_enable = !!(phy->chip_cap & MT792x_CHIP_CAP_MLO_EML_EN) &&
+			  !!(link_conf->vif->cfg.eml_cap &
+			     IEEE80211_EML_CAP_EMLSR_SUPP);
 
 	memcpy(mld->mac_addr, vif->addr, ETH_ALEN);
 }
