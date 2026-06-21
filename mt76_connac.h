@@ -95,7 +95,7 @@ struct mt76_connac_pm {
 	struct {
 		struct mt76_wcid *wcid;
 		struct sk_buff *skb;
-	} tx_q[IEEE80211_NUM_ACS];
+	} tx_q[__MT_TXQ_MAX];
 
 	struct work_struct wake_work;
 	wait_queue_head_t wait;

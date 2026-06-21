@@ -92,7 +92,6 @@ void mt792x_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *control,
 	struct ieee80211_vif *vif = info->control.vif;
 	struct mt76_wcid *wcid = &dev->mt76.global_wcid;
 	u8 link_id;
-	int qid;
 
 	if (control->sta) {
 		struct mt792x_link_sta *mlink;
@@ -134,12 +133,6 @@ void mt792x_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *control,
 		mt76_tx(mphy, control->sta, wcid, skb);
 		mt76_connac_pm_unref(mphy, &dev->pm);
 		return;
-	}
-
-	qid = skb_get_queue_mapping(skb);
-	if (qid >= MT_TXQ_PSD) {
-		qid = IEEE80211_AC_BE;
-		skb_set_queue_mapping(skb, qid);
 	}
 
 	mt76_connac_pm_queue_skb(hw, &dev->pm, wcid, skb);
