@@ -88,7 +88,7 @@ void mt76_connac_free_pending_tx_skbs(struct mt76_connac_pm *pm,
 	int i;
 
 	spin_lock_bh(&pm->txq_lock);
-	for (i = 0; i < IEEE80211_NUM_ACS; i++) {
+	for (i = 0; i < __MT_TXQ_MAX; i++) {
 		if (wcid && pm->tx_q[i].wcid != wcid)
 			continue;
 
@@ -106,6 +106,11 @@ void mt76_connac_pm_queue_skb(struct ieee80211_hw *hw,
 {
 	int qid = skb_get_queue_mapping(skb);
 	struct mt76_phy *phy = hw->priv;
+
+	if (WARN_ON_ONCE(qid >= __MT_TXQ_MAX)) {
+		dev_kfree_skb(skb);
+		return;
+	}
 
 	spin_lock_bh(&pm->txq_lock);
 	if (!pm->tx_q[qid].skb) {
@@ -126,7 +131,7 @@ void mt76_connac_pm_dequeue_skbs(struct mt76_phy *phy,
 	int i;
 
 	spin_lock_bh(&pm->txq_lock);
-	for (i = 0; i < IEEE80211_NUM_ACS; i++) {
+	for (i = 0; i < __MT_TXQ_MAX; i++) {
 		struct mt76_wcid *wcid = pm->tx_q[i].wcid;
 		struct ieee80211_sta *sta = NULL;
 
