@@ -406,6 +406,13 @@ mt7925_mac_fill_rx(struct mt792x_dev *dev, struct sk_buff *skb)
 
 	mt792x_get_status_freq_info(status, chfreq);
 
+	/* MT7927 reports frames from both DBDC RX chains in monitor mode. */
+	if (is_mt7927(&dev->mt76) &&
+	    (mphy->hw->conf.flags & IEEE80211_CONF_MONITOR) &&
+	    phy->mt76->chandef.chan &&
+	    status->freq != phy->mt76->chandef.chan->center_freq)
+		return -EINVAL;
+
 	switch (status->band) {
 	case NL80211_BAND_5GHZ:
 		sband = &mphy->sband_5g.sband;

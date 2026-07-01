@@ -151,7 +151,7 @@ install:
 		zstd -fq --rm $(MODDIR)/*.ko 2>/dev/null || true; \
 	elif ls /lib/modules/$(KVER)/kernel/net/wireless/*.ko.xz >/dev/null 2>&1; then \
 		echo "Compressing modules with xz (matching distro scheme)..."; \
-		xz -f $(MODDIR)/*.ko 2>/dev/null || true; \
+		xz -f -C crc32 $(MODDIR)/*.ko 2>/dev/null || true; \
 	elif ls /lib/modules/$(KVER)/kernel/net/wireless/*.ko.gz >/dev/null 2>&1; then \
 		echo "Compressing modules with gzip (matching distro scheme)..."; \
 		gzip -f $(MODDIR)/*.ko 2>/dev/null || true; \

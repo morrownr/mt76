@@ -3980,6 +3980,9 @@ int mt7925_mcu_set_rxfilter(struct mt792x_dev *dev, u32 fif,
 		.bit_op = bit_op,
 	};
 
+	if (is_mt7927(&dev->mt76) && phy->mt76->chandef.chan)
+		req.band_idx = mt7927_band_idx(phy->mt76->chandef.chan->band);
+
 	return mt76_mcu_send_msg(&phy->dev->mt76, MCU_UNI_CMD(BAND_CONFIG),
 				 &req, sizeof(req), true);
 }

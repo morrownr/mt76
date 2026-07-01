@@ -789,6 +789,9 @@ mt7925_monitor_update_chan(struct mt792x_vif *mvif,
 	if (!chan)
 		return;
 
+	if (ctx)
+		mvif->phy->mt76->chandef = ctx->def;
+
 	mconf->mt76.band_idx = mt7927_band_idx(chan->band);
 	mconf->mt76.basic_rates_idx = MT792x_BASIC_RATES_TBL;
 	if (chan->band != NL80211_BAND_2GHZ)
@@ -808,6 +811,10 @@ mt7925_sniffer_interface_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
 					   NULL);
 
 	mt7925_mcu_set_sniffer(dev, vif, monitor);
+	if (monitor && is_mt7927(&dev->mt76) &&
+	    dev->phy.mt76->chandef.chan)
+		mt7925_mcu_config_sniffer((struct mt792x_vif *)vif->drv_priv,
+					   NULL);
 	pm->enable = pm->enable_user && !monitor;
 	pm->ds_enable = pm->ds_enable_user && !monitor;
 
@@ -884,6 +891,11 @@ static void mt7925_configure_filter(struct ieee80211_hw *hw,
 
 	mt792x_mutex_acquire(dev);
 	mt7925_mcu_set_rxfilter(dev, flags, 0, 0);
+	if (is_mt7927(&dev->mt76) &&
+	    (hw->conf.flags & IEEE80211_CONF_MONITOR))
+		ieee80211_iterate_active_interfaces(hw,
+					    IEEE80211_IFACE_ITER_RESUME_ALL,
+					    mt7925_sniffer_interface_iter, dev);
 	mt792x_mutex_release(dev);
 
 	*total_flags &= (FIF_OTHER_BSS | FIF_FCSFAIL | FIF_CONTROL);
@@ -1998,6 +2010,11 @@ mt7925_change_chanctx(struct ieee80211_hw *hw,
 
 	mt792x_mutex_acquire(phy->dev);
 	if (vif->type == NL80211_IFTYPE_MONITOR) {
+		if (is_mt7927(&phy->dev->mt76) &&
+		    phy->mt76->chandef.chan &&
+		    mt7927_band_idx(phy->mt76->chandef.chan->band) !=
+		    mt7927_band_idx(ctx->def.chan->band))
+			mt7925_mcu_set_sniffer(mvif->phy->dev, vif, false);
 		mt7925_monitor_update_chan(mvif, ctx);
 		mt7925_mcu_set_sniffer(mvif->phy->dev, vif, true);
 		mt7925_mcu_config_sniffer(mvif, ctx);
