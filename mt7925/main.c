@@ -804,17 +804,19 @@ mt7925_sniffer_interface_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
 	struct mt792x_dev *dev = priv;
 	struct ieee80211_hw *hw = mt76_hw(dev);
 	struct mt76_connac_pm *pm = &dev->pm;
+	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
+	struct ieee80211_chanctx_conf *ctx = mvif->bss_conf.mt76.ctx;
 	bool monitor = !!(hw->conf.flags & IEEE80211_CONF_MONITOR);
 
+	if (monitor && !ctx)
+		return;
+
 	if (monitor)
-		mt7925_monitor_update_chan((struct mt792x_vif *)vif->drv_priv,
-					   NULL);
+		mt7925_monitor_update_chan(mvif, ctx);
 
 	mt7925_mcu_set_sniffer(dev, vif, monitor);
-	if (monitor && is_mt7927(&dev->mt76) &&
-	    dev->phy.mt76->chandef.chan)
-		mt7925_mcu_config_sniffer((struct mt792x_vif *)vif->drv_priv,
-					   NULL);
+	if (monitor && is_mt7927(&dev->mt76))
+		mt7925_mcu_config_sniffer(mvif, ctx);
 	pm->enable = pm->enable_user && !monitor;
 	pm->ds_enable = pm->ds_enable_user && !monitor;
 
@@ -2012,6 +2014,7 @@ mt7925_change_chanctx(struct ieee80211_hw *hw,
 	if (vif->type == NL80211_IFTYPE_MONITOR) {
 		if (is_mt7927(&phy->dev->mt76) &&
 		    phy->mt76->chandef.chan &&
+		    ctx->def.chan &&
 		    mt7927_band_idx(phy->mt76->chandef.chan->band) !=
 		    mt7927_band_idx(ctx->def.chan->band))
 			mt7925_mcu_set_sniffer(mvif->phy->dev, vif, false);
