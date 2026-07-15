@@ -1852,7 +1852,7 @@ mt7915_net_fill_forward_path(struct ieee80211_hw *hw,
 	path->dev = ctx->dev;
 	path->mtk_wdma.wdma_idx = wed->wdma_idx;
 	path->mtk_wdma.bss = mvif->mt76.idx;
-	path->mtk_wdma.queue = phy != &dev->phy;
+	path->mtk_wdma.queue = phy->mt76->band_idx;
 	if (test_bit(MT_WCID_FLAG_4ADDR, &msta->wcid.flags) ||
 	    is_mt7915(&dev->mt76))
 		path->mtk_wdma.wcid = msta->wcid.idx;
