@@ -45,14 +45,12 @@ EXPORT_SYMBOL_GPL(____mt76_poll_msec);
 int __mt76_wcid_alloc(u32 *mask, int min, int size)
 {
 	u32 min_mask = ~0;
-	int i, idx = 0, cur;
+	int i, idx, cur;
 
-	mask += min / 32;
-	min %= 32;
-	if (min > 0)
-		min_mask = ~((1 << min) - 1);
+	if (min % 32)
+		min_mask = ~((1 << (min % 32)) - 1);
 
-	for (i = 0; i < DIV_ROUND_UP(size, 32); i++) {
+	for (i = min / 32; i < DIV_ROUND_UP(size, 32); i++) {
 		idx = ffs(~mask[i] & min_mask);
 		min_mask = ~0;
 		if (!idx)
