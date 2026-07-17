@@ -8,6 +8,14 @@
 #include "mcu.h"
 #include "mac.h"
 
+/* compat: kernel 7.2 renamed the EML delay masks (EMLSR_ -> EML_);
+ * the values are unchanged.
+ */
+#ifndef IEEE80211_EML_CAP_EML_PADDING_DELAY
+#define IEEE80211_EML_CAP_EML_PADDING_DELAY	IEEE80211_EML_CAP_EMLSR_PADDING_DELAY
+#define IEEE80211_EML_CAP_EML_TRANSITION_DELAY	IEEE80211_EML_CAP_EMLSR_TRANSITION_DELAY
+#endif
+
 #define MT_STA_BFER			BIT(0)
 #define MT_STA_BFEE			BIT(1)
 
@@ -1958,8 +1966,8 @@ mt7925_mcu_sta_eht_mld_tlv(struct sk_buff *skb,
 
 	eml_cap = (vif->cfg.eml_cap & (IEEE80211_EML_CAP_EMLSR_SUPP |
 				       IEEE80211_EML_CAP_TRANSITION_TIMEOUT)) |
-		  (ext_capa->eml_capabilities & (IEEE80211_EML_CAP_EMLSR_PADDING_DELAY |
-						IEEE80211_EML_CAP_EMLSR_TRANSITION_DELAY));
+		  (ext_capa->eml_capabilities & (IEEE80211_EML_CAP_EML_PADDING_DELAY |
+						IEEE80211_EML_CAP_EML_TRANSITION_DELAY));
 
 	if (eml_cap & IEEE80211_EML_CAP_EMLSR_SUPP) {
 		eht_mld->eml_cap[0] = u16_get_bits(eml_cap, GENMASK(7, 0));
