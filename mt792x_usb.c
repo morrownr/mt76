@@ -130,11 +130,16 @@ EXPORT_SYMBOL_GPL(mt792xu_check_bus);
 
 int mt792xu_reset_on_bus_error(struct mt792x_dev *dev)
 {
-	int err = 0;
+	int err;
 
-	if (!atomic_read(&dev->mt76.bus_hung))
-		err = mt792xu_check_bus(dev);
+	/* Once hung, the no-op bus ops stay installed until the queued USB
+	 * reset re-probes the device. Do not clear bus_hung here, or the caller
+	 * would run a full reset over dropped register I/O and report success.
+	 */
+	if (atomic_read(&dev->mt76.bus_hung))
+		return -EIO;
 
+	err = mt792xu_check_bus(dev);
 	if (err) {
 		mt792xu_set_bus_hung(dev);
 		mt792xu_queue_usb_reset(dev, err);
@@ -142,7 +147,6 @@ int mt792xu_reset_on_bus_error(struct mt792x_dev *dev)
 		return err;
 	}
 
-	atomic_set(&dev->mt76.bus_hung, false);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(mt792xu_reset_on_bus_error);

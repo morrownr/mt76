@@ -755,8 +755,6 @@ void mt76u_stop_rx(struct mt76_dev *dev)
 	int i;
 
 	mt76_worker_disable(&dev->usb.rx_worker);
-	if (dev->napi_dev)
-		napi_disable(&dev->napi[MT_RXQ_MAIN]);
 
 	mt76_for_each_q_rx(dev, i) {
 		struct mt76_queue *q = &dev->q_rx[i];
@@ -765,6 +763,13 @@ void mt76u_stop_rx(struct mt76_dev *dev)
 		for (j = 0; j < q->ndesc; j++)
 			usb_poison_urb(q->entry[j].urb);
 	}
+
+	/* The MAIN queue napi stays enabled for the device lifetime. The URBs
+	 * are now poisoned, so mt76u_complete_rx() can no longer reschedule it;
+	 * just drain any in-flight poll before the caller frees or resets.
+	 */
+	if (dev->napi_dev)
+		napi_synchronize(&dev->napi[MT_RXQ_MAIN]);
 }
 EXPORT_SYMBOL_GPL(mt76u_stop_rx);
 
@@ -785,8 +790,6 @@ int mt76u_resume_rx(struct mt76_dev *dev)
 	}
 
 	mt76_worker_enable(&dev->usb.rx_worker);
-	if (dev->napi_dev)
-		napi_enable(&dev->napi[MT_RXQ_MAIN]);
 
 	return 0;
 }
@@ -1087,8 +1090,8 @@ void mt76u_queues_deinit(struct mt76_dev *dev)
 	mt76u_stop_rx(dev);
 	mt76u_stop_tx(dev);
 
-	/* mt76u_stop_rx() (above) already napi_disable()d the MAIN queue */
 	if (dev->napi_dev) {
+		napi_disable(&dev->napi[MT_RXQ_MAIN]);
 		netif_napi_del(&dev->napi[MT_RXQ_MAIN]);
 		free_netdev(dev->napi_dev);
 		dev->napi_dev = NULL;

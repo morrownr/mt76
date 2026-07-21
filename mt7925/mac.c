@@ -1095,7 +1095,7 @@ mt7928_mac_add_txs_skb_msg(struct mt792x_dev *dev, struct mt76_wcid *wcid,
 
 	info->status.rates[0].idx = -1;
 
-	txrate = pevt->tx_rate;
+	txrate = le16_to_cpu(pevt->tx_rate);
 
 	rate.mcs = FIELD_GET(MT_TX_RATE_IDX, txrate);
 	rate.nss = FIELD_GET(MT_TX_RATE_NSS, txrate) + 1;
@@ -1244,10 +1244,12 @@ void mt7925_mac_add_txs(struct mt792x_dev *dev, void *data)
 
 	txs_fm = le32_get_bits(txs_data[0], MT_TXS0_TXS_FORMAT);
 
-	if (is_mt7928(&dev->mt76) && txs_fm != TXS_FM_MPDU && txs_fm != TXS_FM_PPDU)
+	if (is_mt7928(&dev->mt76)) {
+		if (txs_fm != TXS_FM_MPDU && txs_fm != TXS_FM_PPDU)
+			return;
+	} else if (txs_fm > 1) {
 		return;
-	else if (txs_fm > 1)
-		return;
+	}
 
 	wcidx = le32_get_bits(txs_data[2], MT_TXS2_WCID);
 	pid = le32_get_bits(txs_data[3], MT_TXS3_PID);
