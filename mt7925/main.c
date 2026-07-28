@@ -467,7 +467,11 @@ mt7925_add_interface(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
 	if (ret < 0)
 		goto out;
 
-	vif->driver_flags |= IEEE80211_VIF_BEACON_FILTER;
+	/* A monitor vif must stay a passive sniffer: never enable beacon
+	 * filtering on it, or the firmware drops other-BSS beacons.
+	 */
+	if (vif->type != NL80211_IFTYPE_MONITOR)
+		vif->driver_flags |= IEEE80211_VIF_BEACON_FILTER;
 	if (phy->chip_cap & MT792x_CHIP_CAP_RSSI_NOTIFY_EVT_EN)
 		vif->driver_flags |= IEEE80211_VIF_SUPPORTS_CQM_RSSI;
 
@@ -754,7 +758,8 @@ mt7925_pm_interface_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
 {
 	struct mt792x_dev *dev = priv;
 	struct ieee80211_hw *hw = mt76_hw(dev);
-	bool pm_enable = dev->pm.enable;
+	/* Monitor vifs must never have beacon filtering / PM applied. */
+	bool pm_enable = dev->pm.enable && vif->type != NL80211_IFTYPE_MONITOR;
 	int err;
 
 	err = mt7925_mcu_set_beacon_filter(dev, vif, pm_enable);
@@ -791,6 +796,33 @@ mt7925_monitor_update_chan(struct mt792x_vif *mvif,
 	mconf->mt76.basic_rates_idx = MT792x_BASIC_RATES_TBL;
 	if (chan->band != NL80211_BAND_2GHZ)
 		mconf->mt76.basic_rates_idx += 4;
+}
+
+/* Re-arm the firmware sniffer for a monitor vif on the channel context @ctx.
+ * Shared by the assign-chanctx and change-chanctx paths so monitor mode
+ * follows channel/band changes across 2.4/5/6 GHz, not just the band it was
+ * first enabled on. Caller must hold dev->mt76.mutex.
+ */
+static void
+mt7925_monitor_arm_sniffer(struct mt792x_phy *phy, struct ieee80211_vif *vif,
+			   struct ieee80211_chanctx_conf *ctx)
+{
+	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
+	struct mt792x_dev *dev = phy->dev;
+
+	/* On a cross-band move, disable the sniffer on the old physical band
+	 * first so the firmware re-arms cleanly on the new one.
+	 */
+	if (is_mt7927(&dev->mt76) && phy->mt76->chandef.chan && ctx->def.chan &&
+	    mt7927_band_idx(phy->mt76->chandef.chan->band) !=
+	    mt7927_band_idx(ctx->def.chan->band))
+		mt7925_mcu_set_sniffer(dev, vif, false);
+
+	mt7925_monitor_update_chan(mvif, ctx);
+	mt7925_mcu_set_sniffer(dev, vif, true);
+	mt7925_mcu_config_sniffer(mvif, ctx);
+	/* A sniffer must see other-BSS beacons; never beacon-filter it. */
+	mt7925_mcu_set_beacon_filter(dev, vif, false);
 }
 
 static void
@@ -2017,15 +2049,7 @@ mt7925_change_chanctx(struct ieee80211_hw *hw,
 
 	mt792x_mutex_acquire(phy->dev);
 	if (vif->type == NL80211_IFTYPE_MONITOR) {
-		if (is_mt7927(&phy->dev->mt76) &&
-		    phy->mt76->chandef.chan &&
-		    ctx->def.chan &&
-		    mt7927_band_idx(phy->mt76->chandef.chan->band) !=
-		    mt7927_band_idx(ctx->def.chan->band))
-			mt7925_mcu_set_sniffer(mvif->phy->dev, vif, false);
-		mt7925_monitor_update_chan(mvif, ctx);
-		mt7925_mcu_set_sniffer(mvif->phy->dev, vif, true);
-		mt7925_mcu_config_sniffer(mvif, ctx);
+		mt7925_monitor_arm_sniffer(phy, vif, ctx);
 	} else {
 		if (ieee80211_vif_is_mld(vif)) {
 			unsigned long valid = mvif->valid_links;
@@ -2386,6 +2410,14 @@ static int mt7925_assign_vif_chanctx(struct ieee80211_hw *hw,
 
 	mconf->mt76.ctx = ctx;
 	mctx->bss_conf = mconf;
+
+	/* A monitor vif gets a fresh chanctx on every channel/band change;
+	 * re-arm the sniffer here so it actually retunes instead of staying
+	 * stuck on the band where monitor was first enabled.
+	 */
+	if (vif->type == NL80211_IFTYPE_MONITOR)
+		mt7925_monitor_arm_sniffer(mvif->phy, vif, ctx);
+
 	mutex_unlock(&dev->mt76.mutex);
 
 	return 0;
