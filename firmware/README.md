@@ -247,7 +247,7 @@ WIFI File: lib/firmware/mediatek/mt7927/WIFI_RAM_CODE_MT6639_2_1.bin
 ```
 
 ```
-BT File: lib/firmware/BT_RAM_CODE_MT6639_2_1_hdr.bin
+BT File: lib/firmware/mediatek/mt7927/BT_RAM_CODE_MT6639_2_1_hdr.bin
 ```
 
 -----
