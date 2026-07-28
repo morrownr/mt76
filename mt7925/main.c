@@ -808,17 +808,36 @@ mt7925_monitor_arm_sniffer(struct mt792x_phy *phy, struct ieee80211_vif *vif,
 			   struct ieee80211_chanctx_conf *ctx)
 {
 	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
+	struct mt792x_bss_conf *mconf = &mvif->bss_conf;
 	struct mt792x_dev *dev = phy->dev;
 
 	/* On a cross-band move, disable the sniffer on the old physical band
 	 * first so the firmware re-arms cleanly on the new one.
+	 *
+	 * mt7925_mcu_set_sniffer() resolves its band_idx from
+	 * mvif->bss_conf.mt76.ctx (falling back to the PHY chandef only when
+	 * that pointer is NULL), not from an argument we control. On the
+	 * assign_vif_chanctx path the caller may have already pointed
+	 * mconf->mt76.ctx at the new ctx before calling in here, and on
+	 * change_chanctx @ctx is the same object mac80211 already mutated to
+	 * the new channel. Either way, calling mt7925_mcu_set_sniffer()
+	 * as-is would report the *new* band on what is supposed to be the
+	 * old-band teardown. Temporarily clear the ctx pointer so the lookup
+	 * falls back to phy->mt76->chandef.chan, which mt7925_monitor_update_chan()
+	 * below hasn't overwritten yet and is therefore still the old band.
 	 */
 	if (is_mt7927(&dev->mt76) && phy->mt76->chandef.chan && ctx->def.chan &&
 	    mt7927_band_idx(phy->mt76->chandef.chan->band) !=
-	    mt7927_band_idx(ctx->def.chan->band))
+	    mt7927_band_idx(ctx->def.chan->band)) {
+		struct ieee80211_chanctx_conf *old_ctx = mconf->mt76.ctx;
+
+		mconf->mt76.ctx = NULL;
 		mt7925_mcu_set_sniffer(dev, vif, false);
+		mconf->mt76.ctx = old_ctx;
+	}
 
 	mt7925_monitor_update_chan(mvif, ctx);
+	mconf->mt76.ctx = ctx;
 	mt7925_mcu_set_sniffer(dev, vif, true);
 	mt7925_mcu_config_sniffer(mvif, ctx);
 	/* A sniffer must see other-BSS beacons; never beacon-filter it. */
@@ -2408,15 +2427,20 @@ static int mt7925_assign_vif_chanctx(struct ieee80211_hw *hw,
 		}
 	}
 
-	mconf->mt76.ctx = ctx;
-	mctx->bss_conf = mconf;
-
 	/* A monitor vif gets a fresh chanctx on every channel/band change;
 	 * re-arm the sniffer here so it actually retunes instead of staying
-	 * stuck on the band where monitor was first enabled.
+	 * stuck on the band where monitor was first enabled. Do this before
+	 * mconf->mt76.ctx is pointed at the new ctx below: the helper needs
+	 * to see the still-old ctx (or NULL, on first assignment) to detect
+	 * a cross-band move correctly; it sets mconf->mt76.ctx itself once
+	 * the old-band teardown is done.
 	 */
-	if (vif->type == NL80211_IFTYPE_MONITOR)
+	if (vif->type == NL80211_IFTYPE_MONITOR) {
 		mt7925_monitor_arm_sniffer(mvif->phy, vif, ctx);
+	} else {
+		mconf->mt76.ctx = ctx;
+	}
+	mctx->bss_conf = mconf;
 
 	mutex_unlock(&dev->mt76.mutex);
 
