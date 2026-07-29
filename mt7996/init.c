@@ -464,6 +464,8 @@ mt7996_init_wiphy_band(struct ieee80211_hw *hw, struct mt7996_phy *phy)
 	radio->n_freq_range = 1;
 	radio->iface_combinations = &if_comb;
 	radio->n_iface_combinations = 1;
+	memcpy(dev->radio_addrs[n_radios].addr, phy->mt76->macaddr, ETH_ALEN);
+	hw->wiphy->n_addresses++;
 	hw->wiphy->n_radio++;
 
 	wiphy->available_antennas_rx |= phy->mt76->chainmask;
@@ -506,6 +508,7 @@ mt7996_init_wiphy(struct ieee80211_hw *hw, struct mtk_wed_device *wed)
 	wiphy->n_iface_combinations = 1;
 
 	wiphy->radio = dev->radios;
+	wiphy->addresses = dev->radio_addrs;
 
 	wiphy->reg_notifier = mt7996_regd_notifier;
 	wiphy->flags |= WIPHY_FLAG_HAS_CHANNEL_SWITCH |
@@ -563,6 +566,9 @@ mt7996_mac_init_band(struct mt7996_dev *dev, u8 band)
 {
 	u32 mask, set;
 
+	if (!mt7996_band_valid(dev, band))
+		return;
+
 	/* clear estimated value of EIFS for Rx duration & OBSS time */
 	mt76_wr(dev, MT_WF_RMAC_RSVD0(band), MT_WF_RMAC_RSVD0_EIFS_CLR);
 
@@ -594,6 +600,9 @@ mt7996_mac_init_band(struct mt7996_dev *dev, u8 band)
 	 * MT_AGG_ACR_PPDU_TXS2H (PPDU format) even though ACR bit is set.
 	 */
 	mt76_set(dev, MT_AGG_ACR4(band), MT_AGG_ACR_PPDU_TXS2H);
+
+	if (!is_mt7996(&dev->mt76))
+		mt7996_mcu_set_bssid_mapping_addr(&dev->mt76, band);
 }
 
 static void mt7996_mac_init_basic_rates(struct mt7996_dev *dev)
@@ -614,6 +623,7 @@ static void mt7996_mac_init_basic_rates(struct mt7996_dev *dev)
 void mt7996_mac_init(struct mt7996_dev *dev)
 {
 #define HIF_TXD_V2_1	0x21
+	struct mt7996_phy *phy;
 	int i, rx_path_type;
 
 	mt76_clear(dev, MT_MDP_DCR2, MT_MDP_DCR2_RX_TRANS_SHORT);
@@ -660,6 +670,9 @@ void mt7996_mac_init(struct mt7996_dev *dev)
 	for (i = MT_BAND0; i <= MT_BAND2; i++)
 		mt7996_mac_init_band(dev, i);
 
+	mt7996_for_each_phy(dev, phy)
+		mt7996_vow_init(phy);
+
 	mt7996_mac_init_basic_rates(dev);
 }
 
@@ -681,6 +694,17 @@ int mt7996_txbf_init(struct mt7996_dev *dev)
 
 	/* enable eBF */
 	return mt7996_mcu_set_txbf(dev, BF_HW_EN_UPDATE);
+}
+
+void mt7996_vow_init(struct mt7996_phy *phy)
+{
+	phy->dev->vow_atf_en = true;
+
+	mt7996_mcu_set_vow_drr_ctrl(phy->dev, phy->mt76->band_idx, NULL, NULL,
+				    VOW_DRR_CTRL_AIRTIME_DEFICIT_BOUND, 0);
+	mt7996_mcu_set_vow_drr_ctrl(phy->dev, phy->mt76->band_idx, NULL, NULL,
+				    VOW_DRR_CTRL_AIRTIME_QUANTUM_ALL, 0);
+	mt7996_mcu_set_vow_feature_ctrl(phy);
 }
 
 static int mt7996_register_phy(struct mt7996_dev *dev, enum mt76_band_id band)
@@ -1565,7 +1589,6 @@ mt7996_init_eht_caps(struct mt7996_phy *phy, enum nl80211_band band,
 	struct ieee80211_sta_eht_cap *eht_cap = &data->eht_cap;
 	struct ieee80211_eht_cap_elem_fixed *eht_cap_elem = &eht_cap->eht_cap_elem;
 	struct ieee80211_eht_mcs_nss_supp *eht_nss = &eht_cap->eht_mcs_nss_supp;
-	enum nl80211_chan_width width = phy->mt76->chandef.width;
 	int nss = hweight8(phy->mt76->antenna_mask);
 	int sts = hweight16(phy->mt76->chainmask);
 	u8 val;
@@ -1641,11 +1664,16 @@ mt7996_init_eht_caps(struct mt7996_phy *phy, enum nl80211_band band,
 		u8_encode_bits(u8_get_bits(1, GENMASK(1, 0)),
 			       IEEE80211_EHT_PHY_CAP5_MAX_NUM_SUPP_EHT_LTF_MASK);
 
-	val = width == NL80211_CHAN_WIDTH_320 ? 0xf :
-	      width == NL80211_CHAN_WIDTH_160 ? 0x7 :
-	      width == NL80211_CHAN_WIDTH_80 ? 0x3 : 0x1;
-	eht_cap_elem->phy_cap_info[6] =
-		u8_encode_bits(val, IEEE80211_EHT_PHY_CAP6_MCS15_SUPP_MASK);
+	eht_cap_elem->phy_cap_info[6] = IEEE80211_EHT_PHY_CAP6_MCS15_SUPP_MASK;
+	if (band != NL80211_BAND_6GHZ) {
+		eht_cap_elem->phy_cap_info[6] &=
+			~IEEE80211_EHT_PHY_CAP6_MCS15_SUPP_320MHZ;
+
+		if (band != NL80211_BAND_5GHZ)
+			eht_cap_elem->phy_cap_info[6] &=
+				~(IEEE80211_EHT_PHY_CAP6_MCS15_SUPP_160MHZ |
+				  IEEE80211_EHT_PHY_CAP6_MCS15_SUPP_80MHZ);
+	}
 
 	val = u8_encode_bits(nss, IEEE80211_EHT_MCS_NSS_RX) |
 	      u8_encode_bits(nss, IEEE80211_EHT_MCS_NSS_TX);
@@ -1803,6 +1831,8 @@ void mt7996_unregister_device(struct mt7996_dev *dev)
 {
 	cancel_work_sync(&dev->dump_work);
 	cancel_work_sync(&dev->wed_rro.work);
+	cancel_work_sync(&dev->reset_work);
+	cancel_work_sync(&dev->rc_work);
 	mt7996_unregister_phy(mt7996_phy3(dev));
 	mt7996_unregister_phy(mt7996_phy2(dev));
 	mt7996_unregister_thermal(&dev->phy);
