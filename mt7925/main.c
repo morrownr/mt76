@@ -793,15 +793,30 @@ mt7925_monitor_update_chan(struct mt792x_vif *mvif,
 		mconf->mt76.basic_rates_idx += 4;
 }
 
+struct mt7925_sniffer_iter_data {
+	struct mt792x_dev *dev;
+	int error;
+	bool monitor_only;
+};
+
 static void
 mt7925_sniffer_interface_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
 {
-	struct mt792x_dev *dev = priv;
+	struct mt7925_sniffer_iter_data *data = priv;
+	struct mt792x_dev *dev = data->dev;
 	struct ieee80211_hw *hw = mt76_hw(dev);
 	struct mt76_connac_pm *pm = &dev->pm;
 	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
 	struct ieee80211_chanctx_conf *ctx = mvif->bss_conf.mt76.ctx;
 	bool monitor = !!(hw->conf.flags & IEEE80211_CONF_MONITOR);
+	int ret;
+
+	if (data->error)
+		return;
+
+	if ((data->monitor_only || monitor) &&
+	    vif->type != NL80211_IFTYPE_MONITOR)
+		return;
 
 	if (monitor && !ctx)
 		return;
@@ -809,16 +824,47 @@ mt7925_sniffer_interface_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
 	if (monitor)
 		mt7925_monitor_update_chan(mvif, ctx);
 
-	mt7925_mcu_set_sniffer(dev, vif, monitor);
-	if (monitor && is_mt7927(&dev->mt76))
-		mt7925_mcu_config_sniffer(mvif, ctx);
+	ret = mt7925_mcu_set_sniffer(dev, vif, monitor);
+	if (ret)
+		goto error;
+
+	if (monitor && is_mt7927(&dev->mt76)) {
+		ret = mt7925_mcu_config_sniffer(mvif, ctx);
+		if (ret)
+			goto error;
+	}
+
 	pm->enable = pm->enable_user && !monitor;
 	pm->ds_enable = pm->ds_enable_user && !monitor;
 
-	mt7925_mcu_set_deep_sleep(dev, pm->ds_enable);
+	ret = mt7925_mcu_set_deep_sleep(dev, pm->ds_enable);
+	if (ret)
+		goto error;
 
-	if (monitor)
-		mt7925_mcu_set_beacon_filter(dev, vif, false);
+	if (monitor) {
+		ret = mt7925_mcu_set_beacon_filter(dev, vif, false);
+		if (ret)
+			goto error;
+	}
+
+	return;
+
+error:
+	data->error = ret;
+}
+
+int mt7925_sniffer_rearm(struct mt792x_dev *dev)
+{
+	struct mt7925_sniffer_iter_data data = {
+		.dev = dev,
+		.monitor_only = true,
+	};
+
+	ieee80211_iterate_active_interfaces(mt76_hw(dev),
+					    IEEE80211_IFACE_ITER_RESUME_ALL,
+					    mt7925_sniffer_interface_iter, &data);
+
+	return data.error;
 }
 
 void mt7925_set_runtime_pm(struct mt792x_dev *dev)
@@ -843,6 +889,9 @@ static int mt7925_config(struct ieee80211_hw *hw, u32 changed)
 #endif
 {
 	struct mt792x_dev *dev = mt792x_hw_dev(hw);
+	struct mt7925_sniffer_iter_data data = {
+		.dev = dev,
+	};
 	int ret = 0;
 
 	mt792x_mutex_acquire(dev);
@@ -856,7 +905,8 @@ static int mt7925_config(struct ieee80211_hw *hw, u32 changed)
 	if (changed & IEEE80211_CONF_CHANGE_MONITOR) {
 		ieee80211_iterate_active_interfaces(hw,
 						    IEEE80211_IFACE_ITER_RESUME_ALL,
-						    mt7925_sniffer_interface_iter, dev);
+						    mt7925_sniffer_interface_iter, &data);
+		ret = data.error;
 	}
 
 out:
@@ -875,6 +925,9 @@ static void mt7925_configure_filter(struct ieee80211_hw *hw,
 #define MT7925_FILTER_OTHER_BSS  BIT(6)
 #define MT7925_FILTER_ENABLE     BIT(31)
 	struct mt792x_dev *dev = mt792x_hw_dev(hw);
+	struct mt7925_sniffer_iter_data data = {
+		.dev = dev,
+	};
 	u32 flags = MT7925_FILTER_ENABLE;
 
 #define MT7925_FILTER(_fif, _type) do {			\
@@ -892,7 +945,10 @@ static void mt7925_configure_filter(struct ieee80211_hw *hw,
 	    (hw->conf.flags & IEEE80211_CONF_MONITOR))
 		ieee80211_iterate_active_interfaces(hw,
 					    IEEE80211_IFACE_ITER_RESUME_ALL,
-					    mt7925_sniffer_interface_iter, dev);
+					    mt7925_sniffer_interface_iter, &data);
+	if (data.error)
+		dev_err(dev->mt76.dev, "sniffer configuration failed: %d\n",
+			data.error);
 	mt792x_mutex_release(dev);
 
 	*total_flags &= (FIF_OTHER_BSS | FIF_FCSFAIL | FIF_CONTROL);

@@ -1568,10 +1568,24 @@ out:
 	if (test_bit(MT76_REMOVED, &dev->mphy.state))
 		return;
 
-	ieee80211_wake_queues(hw);
 	ieee80211_iterate_active_interfaces(hw,
 					    IEEE80211_IFACE_ITER_RESUME_ALL,
 					    mt7925_vif_connect_iter, NULL);
+	/* mt7925_vif_connect_iter() only reconnects STATION/AP vifs; a
+	 * monitor vif's firmware sniffer state is lost across the reset
+	 * and is never re-armed by anything else in this recovery path.
+	 * Re-arm it before waking queues so RX isn't processed against a
+	 * vif whose sniffer state hasn't been confirmed yet.
+	 */
+	if (hw->conf.flags & IEEE80211_CONF_MONITOR) {
+		mutex_lock(&dev->mt76.mutex);
+		ret = mt7925_sniffer_rearm(dev);
+		mutex_unlock(&dev->mt76.mutex);
+		if (ret)
+			dev_err(dev->mt76.dev,
+				"monitor sniffer re-arm failed: %d\n", ret);
+	}
+	ieee80211_wake_queues(hw);
 	mt76_connac_power_save_sched(&dev->mt76.phy, pm);
 
 	mt7925_regd_change(&dev->phy, "00");
