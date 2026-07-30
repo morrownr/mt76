@@ -31,6 +31,17 @@ void mt792x_irq_tasklet(unsigned long data)
 	const struct mt792x_irq_map *irq_map = dev->irq_map;
 	u32 intr, mask = 0;
 
+	/* This can already be queued by mt792x_irq_handler() before
+	 * MT76_REMOVED is observed there. Bail out here too instead of
+	 * touching hardware registers and calling napi_schedule() during
+	 * teardown -- every other bus type in this driver family already
+	 * makes this check (usb.c, mt76x02_usb_mcu.c); PCI was missing it,
+	 * and napi_disable() during remove has no bound on how long it
+	 * waits for a NAPI poll that keeps getting rescheduled.
+	 */
+	if (test_bit(MT76_REMOVED, &dev->mt76.phy.state))
+		return;
+
 	mt76_wr(dev, irq_map->host_irq_enable, 0);
 
 	intr = mt76_rr(dev, MT_WFDMA0_HOST_INT_STA);

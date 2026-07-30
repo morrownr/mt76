@@ -40,7 +40,6 @@ static int mt7925e_init_reset(struct mt792x_dev *dev)
 
 static void mt7925e_unregister_device(struct mt792x_dev *dev)
 {
-	int i;
 	struct mt76_connac_pm *pm = &dev->pm;
 	struct ieee80211_hw *hw = mt76_hw(dev);
 
@@ -50,8 +49,15 @@ static void mt7925e_unregister_device(struct mt792x_dev *dev)
 	cancel_work_sync(&dev->reset_work);
 	cancel_work_sync(&dev->init_work);
 	mt76_unregister_device(&dev->mt76);
-	mt76_for_each_q_rx(&dev->mt76, i)
-		napi_disable(&dev->mt76.napi[i]);
+	/* mt792x_dma_cleanup() below (via mt76_dma_cleanup()) already does
+	 * napi_disable() + netif_napi_del() for every RX queue. Calling
+	 * napi_disable() here too, on the same queues with no intervening
+	 * napi_enable(), is redundant and can hang: if the PCI IRQ tasklet
+	 * manages to run once more in between the two calls (it didn't
+	 * check MT76_REMOVED before this fix) and reschedules NAPI, this
+	 * second, unpaired disable call has nothing left to wait for that
+	 * will ever complete.
+	 */
 	cancel_delayed_work_sync(&pm->ps_work);
 	cancel_delayed_work_sync(&dev->mlo_pm_work);
 	cancel_work_sync(&pm->wake_work);
