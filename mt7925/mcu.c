@@ -469,6 +469,7 @@ mt7925_mcu_tx_done_event(struct mt792x_dev *dev, struct sk_buff *skb)
 		u8 rsv[3];
 		u8 data[];
 	} __packed * txs;
+	struct mt7928_uni_txdone_event *evt;
 	struct tlv *tlv;
 	u32 tlv_len;
 
@@ -479,8 +480,6 @@ mt7925_mcu_tx_done_event(struct mt792x_dev *dev, struct sk_buff *skb)
 	while (tlv_len > 0 && le16_to_cpu(tlv->len) <= tlv_len) {
 		switch (le16_to_cpu(tlv->tag)) {
 		case UNI_EVENT_TX_DONE_MSG:
-			struct mt7928_uni_txdone_event *evt;
-
 			if (!is_mt7928(&dev->mt76))
 				break;
 
