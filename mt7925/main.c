@@ -804,11 +804,10 @@ mt7925_sniffer_interface_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
 {
 	struct mt7925_sniffer_iter_data *data = priv;
 	struct mt792x_dev *dev = data->dev;
-	struct ieee80211_hw *hw = mt76_hw(dev);
 	struct mt76_connac_pm *pm = &dev->pm;
 	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
 	struct ieee80211_chanctx_conf *ctx = mvif->bss_conf.mt76.ctx;
-	bool monitor = !!(hw->conf.flags & IEEE80211_CONF_MONITOR);
+	bool monitor = vif->type == NL80211_IFTYPE_MONITOR;
 	int ret;
 
 	if (data->error)
@@ -828,7 +827,7 @@ mt7925_sniffer_interface_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
 	if (ret)
 		goto error;
 
-	if (monitor && is_mt7927(&dev->mt76)) {
+	if (monitor) {
 		ret = mt7925_mcu_config_sniffer(mvif, ctx);
 		if (ret)
 			goto error;
