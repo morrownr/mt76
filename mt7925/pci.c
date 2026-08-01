@@ -61,8 +61,6 @@ static void mt7925e_unregister_device(struct mt792x_dev *dev)
 	mt792x_dma_cleanup(dev);
 	mt792x_wfsys_reset(dev);
 	skb_queue_purge(&dev->mt76.mcu.res_q);
-
-	tasklet_disable(&dev->mt76.irq_tasklet);
 }
 
 static void mt7925_reg_remap_restore(struct mt792x_dev *dev)
@@ -725,6 +723,7 @@ static void mt7925_pci_remove(struct pci_dev *pdev)
 	set_bit(MT76_REMOVED, &mdev->phy.state);
 	mt7925e_unregister_device(dev);
 	devm_free_irq(&pdev->dev, pdev->irq, dev);
+	tasklet_kill(&dev->mt76.irq_tasklet);
 	mt76_free_device(&dev->mt76);
 	pci_free_irq_vectors(pdev);
 }
