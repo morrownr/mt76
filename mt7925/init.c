@@ -21,6 +21,9 @@ static ssize_t mt7925_thermal_temp_show(struct device *dev,
 		struct mt792x_dev *mdev = phy->dev;
 		int temperature;
 
+		if (test_bit(MT76_REMOVED, &mdev->mphy.state))
+			return -ENODEV;
+
 		mt792x_mutex_acquire(mdev);
 		temperature = mt7925_mcu_get_temperature(phy);
 		mt792x_mutex_release(mdev);

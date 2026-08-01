@@ -1657,6 +1657,9 @@ int mt7925_mcu_uni_bss_ps(struct mt792x_dev *dev,
 		},
 	};
 
+	if (test_bit(MT76_REMOVED, &dev->mphy.state))
+		return 0;
+
 	if (link_conf->vif->type != NL80211_IFTYPE_STATION)
 		return -EOPNOTSUPP;
 
@@ -1694,6 +1697,9 @@ mt7925_mcu_uni_bss_bcnft(struct mt792x_dev *dev,
 			.dtim_period = link_conf->dtim_period,
 		},
 	};
+
+	if (test_bit(MT76_REMOVED, &dev->mphy.state))
+		return 0;
 
 	if (link_conf->vif->type != NL80211_IFTYPE_STATION)
 		return 0;
@@ -1752,6 +1758,9 @@ mt7925_mcu_set_bss_pm(struct mt792x_dev *dev,
 		},
 	};
 	int err;
+
+	if (test_bit(MT76_REMOVED, &dev->mphy.state))
+		return 0;
 
 	err = mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(BSS_INFO_UPDATE),
 				&req1, sizeof(req1), true);
@@ -2403,6 +2412,9 @@ mt7925_mcu_uni_add_beacon_offload(struct mt792x_dev *dev,
 	struct sk_buff *skb;
 	u8 cap_offs;
 
+	if (test_bit(MT76_REMOVED, &dev->mphy.state))
+		return 0;
+
 	/* support enable/update process only
 	 * disable flow would be handled in bss stop handler automatically
 	 */
@@ -2559,6 +2571,9 @@ int mt7925_mcu_set_eht_pp(struct mt76_phy *phy, struct mt76_vif_link *mvif,
 {
 	struct sk_buff *skb;
 
+	if (test_bit(MT76_REMOVED, &phy->state))
+		return 0;
+
 	skb = __mt7925_mcu_alloc_bss_req(phy->dev, mvif,
 					 MT7925_BSS_UPDATE_MAX_SIZE);
 	if (IS_ERR(skb))
@@ -2575,6 +2590,9 @@ int mt7925_mcu_set_chctx(struct mt76_phy *phy, struct mt76_vif_link *mvif,
 			 struct ieee80211_chanctx_conf *ctx)
 {
 	struct sk_buff *skb;
+
+	if (test_bit(MT76_REMOVED, &phy->state))
+		return 0;
 
 	skb = __mt7925_mcu_alloc_bss_req(phy->dev, mvif,
 					 MT7925_BSS_UPDATE_MAX_SIZE);
@@ -2913,6 +2931,9 @@ int mt7925_mcu_set_timing(struct mt792x_phy *phy,
 	struct mt792x_dev *dev = phy->dev;
 	struct sk_buff *skb;
 
+	if (test_bit(MT76_REMOVED, &phy->mt76->state))
+		return 0;
+
 	skb = __mt7925_mcu_alloc_bss_req(&dev->mt76, &mconf->mt76,
 					 MT7925_BSS_UPDATE_MAX_SIZE);
 	if (IS_ERR(skb))
@@ -2963,6 +2984,9 @@ void mt7925_mcu_del_dev(struct mt76_dev *mdev,
 		},
 	};
 
+	if (test_bit(MT76_REMOVED, &mdev->phy.state))
+		return;
+
 	dev_req.hdr.omac_idx = mvif->omac_idx;
 	dev_req.hdr.band_idx = mvif->band_idx;
 
@@ -2992,6 +3016,9 @@ int mt7925_mcu_add_bss_info_sta(struct mt792x_phy *phy,
 	struct mt792x_dev *dev = phy->dev;
 	struct sk_buff *skb;
 	int err;
+
+	if (test_bit(MT76_REMOVED, &phy->mt76->state))
+		return 0;
 
 	skb = __mt7925_mcu_alloc_bss_req(&dev->mt76, &mconf->mt76,
 					 MT7925_BSS_UPDATE_MAX_SIZE);

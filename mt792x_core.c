@@ -180,8 +180,9 @@ void mt792x_mac_link_bss_remove(struct mt792x_dev *dev,
 	link_conf = mt792x_vif_to_bss_conf(vif, mconf->link_id);
 
 	mt76_connac_free_pending_tx_skbs(&dev->pm, &mlink->wcid);
-	mt76_connac_mcu_uni_add_dev(&dev->mphy, link_conf, &mconf->mt76,
-				    &mlink->wcid, false);
+	if (!test_bit(MT76_REMOVED, &dev->mphy.state))
+		mt76_connac_mcu_uni_add_dev(&dev->mphy, link_conf, &mconf->mt76,
+					    &mlink->wcid, false);
 
 	rcu_assign_pointer(dev->mt76.wcid[idx], NULL);
 
@@ -999,16 +1000,44 @@ int mt792xe_mcu_fw_pmctrl(struct mt792x_dev *dev)
 }
 EXPORT_SYMBOL_GPL(mt792xe_mcu_fw_pmctrl);
 
+static int mt7925_prepare_firmware_download(struct mt792x_dev *dev)
+{
+	int ret;
+
+	if (!is_mt7925(&dev->mt76))
+		return 0;
+
+	ret = mt792x_wfsys_reset(dev);
+	if (ret)
+		return ret;
+
+	ret = mt76_connac_mcu_restart(&dev->mt76);
+	if (ret)
+		return ret;
+
+	if (!mt76_poll_msec(dev, MT_CONN_ON_MISC, MT_TOP_MISC_FW_STATE,
+			    MT_TOP_MISC2_FW_PWR_ON, 1000))
+		return -ETIMEDOUT;
+
+	return 0;
+}
+
 int mt792x_load_firmware(struct mt792x_dev *dev)
 {
 	int ret;
 
-	mt76_connac_mcu_restart(&dev->mt76);
+	ret = mt76_connac_mcu_restart(&dev->mt76);
+	if (ret && is_mt7925(&dev->mt76))
+		return ret;
 
 	if (!mt76_poll_msec(dev, MT_CONN_ON_MISC, MT_TOP_MISC_FW_STATE,
-			    MT_TOP_MISC2_FW_PWR_ON, 1000))
+			    MT_TOP_MISC2_FW_PWR_ON, 1000)) {
 		dev_warn(dev->mt76.dev,
 			 "MCU is not ready for firmware download\n");
+		ret = mt7925_prepare_firmware_download(dev);
+		if (ret)
+			return ret;
+	}
 
 	if (is_mt7928(&dev->mt76)) {
 		dev_info(dev->mt76.dev, "Loading CB firmware patch: %s\n",

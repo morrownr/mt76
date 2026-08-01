@@ -15,6 +15,10 @@ void mt792x_mac_work(struct work_struct *work)
 					       mac_work.work);
 	phy = mphy->priv;
 
+	if (test_bit(MT76_REMOVED, &mphy->state) ||
+	    !test_bit(MT76_STATE_RUNNING, &mphy->state))
+		return;
+
 	mt792x_mutex_acquire(phy->dev);
 
 	mt76_update_survey(mphy);
@@ -27,8 +31,10 @@ void mt792x_mac_work(struct work_struct *work)
 	mt792x_mutex_release(phy->dev);
 
 	mt76_tx_status_check(mphy->dev, false);
-	ieee80211_queue_delayed_work(phy->mt76->hw, &mphy->mac_work,
-				     MT792x_WATCHDOG_TIME);
+	if (!test_bit(MT76_REMOVED, &mphy->state) &&
+	    test_bit(MT76_STATE_RUNNING, &mphy->state))
+		ieee80211_queue_delayed_work(phy->mt76->hw, &mphy->mac_work,
+					     MT792x_WATCHDOG_TIME);
 }
 EXPORT_SYMBOL_GPL(mt792x_mac_work);
 
@@ -335,7 +341,8 @@ void mt792x_pm_wake_work(struct work_struct *work)
 			mt76_connac_pm_dequeue_skbs(mphy, &dev->pm);
 			mt76_connac_tx_cleanup(mdev);
 		}
-		if (test_bit(MT76_STATE_RUNNING, &mphy->state))
+		if (!test_bit(MT76_REMOVED, &mphy->state) &&
+		    test_bit(MT76_STATE_RUNNING, &mphy->state))
 			ieee80211_queue_delayed_work(mphy->hw, &mphy->mac_work,
 						     MT792x_WATCHDOG_TIME);
 	}

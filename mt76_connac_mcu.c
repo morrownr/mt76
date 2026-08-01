@@ -1194,6 +1194,10 @@ int mt76_connac_mcu_uni_add_dev(struct mt76_phy *phy,
 				bool enable)
 {
 	struct mt76_dev *dev = phy->dev;
+
+	if (!enable && test_bit(MT76_REMOVED, &phy->state))
+		return 0;
+
 	struct {
 		struct {
 			u8 omac_idx;
@@ -1521,6 +1525,9 @@ mt76_connac_mcu_uni_bss_he_tlv(struct mt76_phy *phy, struct ieee80211_vif *vif,
 int mt76_connac_mcu_uni_set_chctx(struct mt76_phy *phy, struct mt76_vif_link *mvif,
 				  struct ieee80211_chanctx_conf *ctx)
 {
+	if (test_bit(MT76_REMOVED, &phy->state))
+		return 0;
+
 	struct cfg80211_chan_def *chandef = ctx ? &ctx->def : &phy->chandef;
 	int freq1 = chandef->center_freq1, freq2 = chandef->center_freq2;
 	enum nl80211_band band = chandef->chan->band;
@@ -1606,6 +1613,9 @@ int mt76_connac_mcu_uni_add_bss(struct mt76_phy *phy,
 				bool enable,
 				struct ieee80211_chanctx_conf *ctx)
 {
+	if (test_bit(MT76_REMOVED, &phy->state))
+		return 0;
+
 	struct mt76_vif_link *mvif = (struct mt76_vif_link *)vif->drv_priv;
 	struct cfg80211_chan_def *chandef = ctx ? &ctx->def : &phy->chandef;
 	enum nl80211_band band = chandef->chan->band;
