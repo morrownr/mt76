@@ -40,29 +40,64 @@ static int mt7925e_init_reset(struct mt792x_dev *dev)
 
 static void mt7925e_unregister_device(struct mt792x_dev *dev)
 {
-	int i;
 	struct mt76_connac_pm *pm = &dev->pm;
 	struct ieee80211_hw *hw = mt76_hw(dev);
+	int i;
 
 	if (dev->phy.chip_cap & MT792x_CHIP_CAP_WF_RF_PIN_CTRL_EVT_EN)
 		wiphy_rfkill_stop_polling(hw->wiphy);
 
 	cancel_work_sync(&dev->reset_work);
 	cancel_work_sync(&dev->init_work);
+	__mt792x_mcu_drv_pmctrl(dev);
 	mt76_unregister_device(&dev->mt76);
-	mt76_for_each_q_rx(&dev->mt76, i)
-		napi_disable(&dev->mt76.napi[i]);
 	cancel_delayed_work_sync(&pm->ps_work);
 	cancel_delayed_work_sync(&dev->mlo_pm_work);
 	cancel_work_sync(&pm->wake_work);
 
+	/* Quiesce RX NAPI before tx_token_put()'s idr_destroy(): a still
+	 * in-flight poll can reach PKT_TYPE_TXRX_NOTIFY -> mt76_token_release()
+	 * -> idr_remove() on the same idr, racing idr_destroy() below
+	 * (morrownr/mt76 PR #70 review, Sashiko/Lucid-Duck).
+	 *
+	 * No tasklet_disable() here: mt792x_irq_handler() already checks
+	 * MT76_REMOVED (already set by the caller) before ever calling
+	 * tasklet_schedule(), so no *new* scheduling can happen regardless.
+	 * Disabling here too would leave irq_tasklet disabled with nothing to
+	 * re-enable it before mt7925_pci_remove()'s tasklet_kill() -- a
+	 * disabled-but-still-scheduled tasklet never clears
+	 * TASKLET_STATE_SCHED, so that kill would spin forever instead of
+	 * returning (morrownr/mt76 PR #71 review, Lucid-Duck). Left enabled,
+	 * mt792x_irq_tasklet()'s own MT76_REMOVED guard makes it a safe no-op
+	 * if it does still run once from an IRQ that raced the flag, and
+	 * tasklet_kill() can then wait it out normally.
+	 *
+	 * Left disabled from here on, deliberately not re-enabled: PR #72
+	 * reverted mt76_dma_cleanup()'s own napi_disable(), so this is now
+	 * the only disable in the whole teardown and mt792x_dma_cleanup()'s
+	 * netif_napi_del()/page_pool_destroy() below expect NAPI to already
+	 * be off. Re-enabling here would leave it on for that, which is what
+	 * those warn on.
+	 */
+	mt76_for_each_q_rx(&dev->mt76, i)
+		napi_disable(&dev->mt76.napi[i]);
+
 	mt7925_tx_token_put(dev);
+
+	/* Re-assert driver ownership: mt76_unregister_device() above can run
+	 * vif teardown that queues pm->ps_work, which can hand ownership back
+	 * to firmware before cancel_delayed_work_sync(&pm->ps_work) catches
+	 * it. The __mt792x_mcu_drv_pmctrl() call before mt76_unregister_device()
+	 * is new, added because that teardown itself needs driver ownership
+	 * too; this one, right before mt792x_dma_cleanup()/mt792x_wfsys_reset()
+	 * below (which do raw WFDMA/WFSYS register I/O), is unchanged from
+	 * before this fix and guarantees ownership is fresh at the point it's
+	 * actually needed, independent of what ps_work did during teardown.
+	 */
 	__mt792x_mcu_drv_pmctrl(dev);
 	mt792x_dma_cleanup(dev);
 	mt792x_wfsys_reset(dev);
 	skb_queue_purge(&dev->mt76.mcu.res_q);
-
-	tasklet_disable(&dev->mt76.irq_tasklet);
 }
 
 static void mt7925_reg_remap_restore(struct mt792x_dev *dev)
@@ -725,6 +760,17 @@ static void mt7925_pci_remove(struct pci_dev *pdev)
 	set_bit(MT76_REMOVED, &mdev->phy.state);
 	mt7925e_unregister_device(dev);
 	devm_free_irq(&pdev->dev, pdev->irq, dev);
+	/* irq_tasklet is never explicitly disabled (see the comment in
+	 * mt7925e_unregister_device()): a disabled-but-still-scheduled
+	 * tasklet never clears TASKLET_STATE_SCHED, which would make this
+	 * call spin instead of returning. It relies solely on
+	 * mt792x_irq_handler()'s and mt792x_irq_tasklet()'s own MT76_REMOVED
+	 * checks to stay inert, and tasklet_kill() here to make sure nothing
+	 * is left pending against dev before mt76_free_device() frees the
+	 * memory it points into (reported upstream:
+	 * lore.kernel.org/all/CABXGCsO07SExb+Z0PeN6MZ1fKC24Tvn3ehSyeQc-3qFC7jM7dQ@mail.gmail.com/).
+	 */
+	tasklet_kill(&dev->mt76.irq_tasklet);
 	mt76_free_device(&dev->mt76);
 	pci_free_irq_vectors(pdev);
 }

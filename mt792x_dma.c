@@ -31,6 +31,17 @@ void mt792x_irq_tasklet(unsigned long data)
 	const struct mt792x_irq_map *irq_map = dev->irq_map;
 	u32 intr, mask = 0;
 
+	/* This can already be queued by mt792x_irq_handler() before
+	 * MT76_REMOVED is observed there. Bail out here too instead of
+	 * touching hardware registers and calling napi_schedule() during
+	 * teardown -- every other bus type in this driver family already
+	 * makes this check (usb.c, mt76x02_usb_mcu.c); PCI was missing it,
+	 * and napi_disable() during remove has no bound on how long it
+	 * waits for a NAPI poll that keeps getting rescheduled.
+	 */
+	if (test_bit(MT76_REMOVED, &dev->mphy.state))
+		return;
+
 	mt76_wr(dev, irq_map->host_irq_enable, 0);
 
 	intr = mt76_rr(dev, MT_WFDMA0_HOST_INT_STA);
@@ -515,6 +526,11 @@ int mt792x_poll_tx(struct napi_struct *napi, int budget)
 
 	dev = container_of(napi, struct mt792x_dev, mt76.tx_napi);
 
+	if (test_bit(MT76_REMOVED, &dev->mphy.state)) {
+		napi_complete(napi);
+		return 0;
+	}
+
 	if (!mt76_connac_pm_ref(&dev->mphy, &dev->pm)) {
 		napi_complete(napi);
 		queue_work(dev->mt76.wq, &dev->pm.wake_work);
@@ -537,6 +553,11 @@ int mt792x_poll_rx(struct napi_struct *napi, int budget)
 	int done;
 
 	dev = mt76_priv(napi->dev);
+
+	if (test_bit(MT76_REMOVED, &dev->mphy.state)) {
+		napi_complete(napi);
+		return 0;
+	}
 
 	if (!mt76_connac_pm_ref(&dev->mphy, &dev->pm)) {
 		napi_complete(napi);
@@ -620,4 +641,3 @@ int mt792x_wfsys_reset(struct mt792x_dev *dev)
 	return mt792x_wfsys_reset_default(dev);
 }
 EXPORT_SYMBOL_GPL(mt792x_wfsys_reset);
-
