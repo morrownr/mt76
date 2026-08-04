@@ -746,10 +746,18 @@ int mt792x_init_wiphy(struct ieee80211_hw *hw)
 	ieee80211_hw_set(hw, HAS_RATE_CONTROL);
 	ieee80211_hw_set(hw, SUPPORTS_TX_ENCAP_OFFLOAD);
 	ieee80211_hw_set(hw, SUPPORTS_RX_DECAP_OFFLOAD);
-	if (is_mt7927(&dev->mt76))
-		ieee80211_hw_set(hw, NO_VIRTUAL_MONITOR);
-	else
-		ieee80211_hw_set(hw, WANT_MONITOR_VIF);
+	/* Under WANT_MONITOR_VIF, ieee80211_set_monitor_channel() redirects
+	 * any monitor vif's channel-set request onto mac80211's single
+	 * shared virtual-monitor sdata instead of the vif's own state. A
+	 * standalone active-flagged monitor vif has no virtual-monitor sdata
+	 * (that only exists for the non-active open path), so the request
+	 * silently no-ops: no chanctx is ever assigned, though the ioctl
+	 * still reports success. NO_VIRTUAL_MONITOR makes mac80211 operate
+	 * on the vif's own sdata instead, matching the already-working
+	 * MT7927 path. Verified on hardware: active monitor now gets a real
+	 * chanctx and receives beacons at the same rate as passive monitor.
+	 */
+	ieee80211_hw_set(hw, NO_VIRTUAL_MONITOR);
 	ieee80211_hw_set(hw, SUPPORTS_PS);
 	ieee80211_hw_set(hw, SUPPORTS_DYNAMIC_PS);
 	ieee80211_hw_set(hw, SUPPORTS_VHT_EXT_NSS_BW);
