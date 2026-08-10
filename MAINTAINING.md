@@ -71,6 +71,20 @@ Short commit id or long, git takes any unique piece of it. Use the 12-character 
 
 When a cherry-pick doesn't apply cleanly, it's almost always one of two shapes. Either openwrt changed a function we've wrapped in a compat guard, in which case keep their change and put the guard back around the new version. Or openwrt touched code we'd already patched a different way, which is rarer, and you look at both and decide what to keep.
 
+## Seeing what is left to pick
+
+    ./show-picks.sh
+
+Lists what openwrt/mt76 has that we do not, oldest first. It works out what is already here by
+reading the "cherry picked from commit" lines, which is why the -x above matters.
+
+For a commit we have decided not to take, put its id in picks-skip.txt with a reason:
+
+    2dd6e4c8  # MT7981 firmware, SoC part this tree does not ship
+
+It drops off the list and gets counted at the bottom instead, so the reason survives and nobody
+re-examines it in six months.
+
 ## Keeping it building on old kernels
 
 The tree has to build all the way down to kernel 6.12, because that's what current Debian ships and plenty of people are on it. When the kernel changes the shape of something between 6.12 and now, we guard it right in the code:
