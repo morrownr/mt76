@@ -1,5 +1,6 @@
 # Commits in openwrt/mt76 we have decided not to take.
 # One id per line, reason after a #. Short or long id both work.
 
-2dd6e4c8  # MT7981 firmware, SoC part this tree does not ship
-50a0c305  # MT7986 firmware, same
+2dd6e4c8  # firmware: update MT7981 firmware to version 20260515
+50a0c305  # firmware: update MT7986 firmware to version 20260515
+f6cf5faf  # firmware: update MT7996 firmware to version 20260311
