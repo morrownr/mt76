@@ -9,7 +9,7 @@
 # It reads the "(cherry picked from commit ...)" lines that git cherry-pick -x
 # adds, so keep using -x and this stays accurate.
 #
-# To drop a commit you have decided not to take, put its id in picks-skip.txt
+# To drop a commit you have decided not to take, put its id in skip-picks.txt
 # beside this script, one per line, reason after a #:
 #
 #     a1b2c3d4e5f6  # mt7981 firmware, not a chip we ship
@@ -34,13 +34,13 @@ if ! git remote | grep -qx "$REMOTE"; then
     exit 1
 fi
 
-skipfile=$(dirname "$0")/picks-skip.txt
+skipfile=$(dirname "$0")/skip-picks.txt
 skiplist=""
 if [ -f "$skipfile" ]; then
     skiplist=$(sed 's/#.*//' "$skipfile" | tr -d ' \t' | grep -v '^$')
 fi
 
-# true when $1, a full commit id, starts with any id listed in picks-skip.txt
+# true when $1, a full commit id, starts with any id listed in skip-picks.txt
 is_skipped() {
     _full=$1
     _oldifs=$IFS

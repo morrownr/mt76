@@ -78,7 +78,7 @@ When a cherry-pick doesn't apply cleanly, it's almost always one of two shapes. 
 Lists what openwrt/mt76 has that we do not, oldest first. It works out what is already here by
 reading the "cherry picked from commit" lines, which is why the -x above matters.
 
-For a commit we have decided not to take, put its id in picks-skip.txt with a reason:
+For a commit we have decided not to take, put its id in skip-picks.txt with a reason:
 
     2dd6e4c8  # MT7981 firmware, SoC part this tree does not ship
 
