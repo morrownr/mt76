@@ -4,3 +4,9 @@
 2dd6e4c8  # firmware: update MT7981 firmware to version 20260515
 50a0c305  # firmware: update MT7986 firmware to version 20260515
 f6cf5faf  # firmware: update MT7996 firmware to version 20260311
+
+# Experimental/testing patches that have been merged but are
+# pending upstreaming
+#
+# Keep these lines commented. They are our own commits rather than openwrt
+# ones, so a bare id here would be counted as a skip and throw the tally off.
