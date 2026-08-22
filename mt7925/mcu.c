@@ -2333,7 +2333,13 @@ int mt7925_mcu_config_sniffer(struct mt792x_vif *vif,
 			.len = cpu_to_le16(sizeof(req.tlv)),
 			.control_ch = chandef->chan->hw_value,
 			.center_ch = ieee80211_frequency_to_channel(freq1),
-			.drop_err = 0,
+			/* Only pass unfiltered/marginal frames when the
+			 * monitor userspace actually asked for them
+			 * (FIF_FCSFAIL, persisted by mt7925_configure_filter()).
+			 * Otherwise keep firmware's default drop behaviour.
+			 */
+			.drop_err = !(vif->phy->rxfilter &
+				      MT7925_FILTER_FCSFAIL),
 		},
 	};
 
