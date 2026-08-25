@@ -21,23 +21,6 @@
 #define MT_STA_BFEE			BIT(1)
 #define MT7925_WOW_PATTERN_NEW_FW_DATE	"20260414153105"
 
-static bool mt7925_mcu_wow_pattern_old_tlv(struct mt76_dev *dev)
-{
-	const char *fw_version = dev->hw->wiphy->fw_version;
-	const char *build_date = strrchr(fw_version, '-');
-
-	if (!is_mt7925(dev))
-		return false;
-
-	if (!build_date)
-		return false;
-
-	build_date++;
-
-	return strncmp(build_date, MT7925_WOW_PATTERN_NEW_FW_DATE,
-		       strlen(MT7925_WOW_PATTERN_NEW_FW_DATE)) < 0;
-}
-
 static bool mt7925_vif_is_nan(struct ieee80211_vif *vif)
 {
 	if (vif->type == NL80211_IFTYPE_NAN)
@@ -259,6 +242,23 @@ mt7925_connac_mcu_set_wow_ctrl(struct mt76_phy *phy, struct ieee80211_vif *vif,
 
 	return mt76_mcu_send_msg(dev, MCU_UNI_CMD(SUSPEND), &req,
 				 sizeof(req), true);
+}
+
+static bool mt7925_mcu_wow_pattern_old_tlv(struct mt76_dev *dev)
+{
+	const char *fw_version = dev->hw->wiphy->fw_version;
+	const char *build_date = strrchr(fw_version, '-');
+
+	if (!is_mt7925(dev))
+		return false;
+
+	if (!build_date)
+		return false;
+
+	build_date++;
+
+	return strncmp(build_date, MT7925_WOW_PATTERN_NEW_FW_DATE,
+		       strlen(MT7925_WOW_PATTERN_NEW_FW_DATE)) < 0;
 }
 
 static int
@@ -3250,8 +3250,6 @@ int mt7925_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
 	struct mt76_dev *mdev = phy->dev;
 	struct mt76_connac_mcu_scan_channel *chan;
 	struct sk_buff *skb;
-	u32 short_ssid[MT7925_RNR_SCAN_MAX_BSSIDS] = {};
-
 	struct scan_hdr_tlv *hdr;
 	struct scan_req_tlv *req;
 	struct scan_ssid_tlv *ssid;
@@ -3294,10 +3292,8 @@ int mt7925_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
 		if (i >= MT7925_RNR_SCAN_MAX_BSSIDS)
 			break;
 
-		short_ssid[n_ssids] = ~crc32_le(~0, sreq->ssids[i].ssid,
-					  sreq->ssids[i].ssid_len);
 		ssid->ssids[n_ssids].ssid_len = cpu_to_le32(sreq->ssids[i].ssid_len);
-		memcpy(ssid->ssids[i].ssid, sreq->ssids[i].ssid,
+		memcpy(ssid->ssids[n_ssids].ssid, sreq->ssids[i].ssid,
 		       sreq->ssids[i].ssid_len);
 		n_ssids++;
 	}
