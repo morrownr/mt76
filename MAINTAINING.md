@@ -33,6 +33,17 @@ If you do want a PR, it's the branch you push to that keeps it from merging:
 
 The branch name is just a label. Nothing merges on its own. GitHub shows a "Compare & pull request" button, and the PR stays open until someone merges it.
 
+Before you merge it, click the Files changed tab at the top of the pull request. That shows exactly what is about to land, line by line, and it is where a change that only half made it across shows itself while it is still easy to put right.
+
+Once you do merge, GitHub leaves a Revert button on that same pull request page. A straight push to main never has one. That on its own is often reason enough to take the branch route for anything you are not completely sure of.
+
+Then go back to the directory you pushed from and pick up what went in:
+
+    git checkout main
+    git pull
+
+Without that pull, main on your machine is still sitting where it was before and the files on disk are the old ones. Anything you compare or copy across next would be measured against the wrong thing, which is a quiet way to lose work.
+
 ## Getting an unfinished fix to a tester
 
 Now and then you've got a fix that isn't ready to merge but you want one person to try it, a reporter on the exact adapter that's failing, say. Push it as a branch and point them at it so they can clone that branch and install, or build it and send them the module directly. It stays off main until their result says it's good.
