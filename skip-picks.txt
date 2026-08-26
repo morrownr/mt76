@@ -10,3 +10,10 @@ f6cf5faf  # firmware: update MT7996 firmware to version 20260311
 #
 # Keep these lines commented. They are our own commits rather than openwrt
 # ones, so a bare id here would be counted as a skip and throw the tally off.
+
+# mt7921: check drv_pmctrl return in the PCIe reset path
+#   Merged 2026-08-26. Without it a failed driver-own handshake still lets the
+#   reset write registers and reload firmware onto a chip we do not own.
+#   Reported and tested by moosager on their own hardware. On the list since
+#   2026-08-09:
+#   https://lore.kernel.org/linux-wireless/20260809012309.43657-1-lucid_duck@justthetip.ca/
