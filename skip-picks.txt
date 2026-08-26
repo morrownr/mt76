@@ -5,15 +5,31 @@
 50a0c305  # firmware: update MT7986 firmware to version 20260515
 f6cf5faf  # firmware: update MT7996 firmware to version 20260311
 
-# Experimental/testing patches that have been merged but are
-# pending upstreaming
+# Section 2. Experimental/testing patches that have been merged here but have
+# not been sent upstream yet.
 #
-# Keep these lines commented. They are our own commits rather than openwrt
-# ones, so a bare id here would be counted as a skip and throw the tally off.
+# Keep sections 2 and 3 commented. They are our own commits rather than
+# openwrt ones, so a bare id here would be counted as a skip and throw the
+# tally off.
+
+# (none)
+
+# Section 3. Patches that have merged here and have been upstreamed.
+#
+# A waiting room rather than a resting place. Once one of these lands upstream
+# and flows back through openwrt it arrives as a new commit with its own id,
+# and show-picks offers it as something we are missing. At that point it wants
+# a line in section 1, with the reason being that we already carry it.
 
 # mt7921: check drv_pmctrl return in the PCIe reset path
-#   Merged 2026-08-26. Without it a failed driver-own handshake still lets the
-#   reset write registers and reload firmware onto a chip we do not own.
-#   Reported and tested by moosager on their own hardware. On the list since
-#   2026-08-09:
+#   Merged 2026-08-26. Reported and tested by moosager on their own
+#   hardware. On the list since 2026-08-09.
 #   https://lore.kernel.org/linux-wireless/20260809012309.43657-1-lucid_duck@justthetip.ca/
+
+# mt7925: honour mac80211's FIF_FCSFAIL instead of hardcoding drop_err
+#   Merged 2026-08-26. On the list since 2026-08-26.
+#   https://lore.kernel.org/linux-wireless/20260826091757.469953-1-markanthonyagarro@gmail.com/
+
+# mt76x02: validate TX-status rate index before mac80211 handoff
+#   Merged 2026-08-26. On the list since 2026-08-26.
+#   https://lore.kernel.org/linux-wireless/20260826092755.480190-1-markanthonyagarro@gmail.com/
