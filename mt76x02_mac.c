@@ -302,20 +302,12 @@ mt76x02_mac_process_tx_rate(struct ieee80211_tx_rate *txrate, u16 rate,
 		txrate->flags |= IEEE80211_TX_RC_GREEN_FIELD;
 		fallthrough;
 	case MT_PHY_TYPE_HT:
-		/* Raw hardware TX-status index is unvalidated; a stale or
-		 * corrupt value here overflows mac80211/minstrel_ht's
-		 * per-group rate array (MCS_GROUP_RATES == 10) and crashes.
-		 * Valid 802.11n MCS indices are 0-31 (four streams x 8).
-		 */
 		if (idx > 31)
 			return -EINVAL;
 		txrate->flags |= IEEE80211_TX_RC_MCS;
 		txrate->idx = idx;
 		break;
 	case MT_PHY_TYPE_VHT:
-		/* Same overflow risk for VHT: mac80211 expects the MCS
-		 * nibble (bits 3:0) in range 0-9, nss packed above it.
-		 */
 		if ((idx & 0xf) > 9)
 			return -EINVAL;
 		txrate->flags |= IEEE80211_TX_RC_VHT_MCS;
