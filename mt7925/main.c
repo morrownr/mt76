@@ -968,9 +968,6 @@ static void mt7925_configure_filter(struct ieee80211_hw *hw,
 				    unsigned int *total_flags,
 				    u64 multicast)
 {
-#define MT7925_FILTER_CONTROL    BIT(5)
-#define MT7925_FILTER_OTHER_BSS  BIT(6)
-#define MT7925_FILTER_ENABLE     BIT(31)
 	struct mt792x_dev *dev = mt792x_hw_dev(hw);
 	struct mt792x_phy *phy = mt792x_hw_phy(hw);
 	u32 flags = MT7925_FILTER_ENABLE;
@@ -984,10 +981,6 @@ static void mt7925_configure_filter(struct ieee80211_hw *hw,
 	MT7925_FILTER(FIF_CONTROL, CONTROL);
 	MT7925_FILTER(FIF_OTHER_BSS, OTHER_BSS);
 
-	/* Persist what mac80211 actually asked for so the firmware sniffer
-	 * config (mt7925_mcu_config_sniffer()) can honour it instead of
-	 * hardcoding drop_err.
-	 */
 	phy->rxfilter = flags;
 
 	mt792x_mutex_acquire(dev);

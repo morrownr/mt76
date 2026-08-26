@@ -7,13 +7,12 @@
 #include "../mt792x.h"
 #include "regs.h"
 
-#define MT7925_BEACON_RATES_TBL		25
-
-/* Bit mac80211's FIF_FCSFAIL request is mirrored into, persisted on
- * dev->mt76.rxfilter by mt7925_configure_filter() so mt7925_mcu_config_sniffer()
- * can honour it later instead of hardcoding the firmware sniffer's drop_err.
- */
 #define MT7925_FILTER_FCSFAIL		BIT(2)
+#define MT7925_FILTER_CONTROL		BIT(5)
+#define MT7925_FILTER_OTHER_BSS	BIT(6)
+#define MT7925_FILTER_ENABLE		BIT(31)
+
+#define MT7925_BEACON_RATES_TBL		25
 
 #define MT7925_TX_RING_SIZE		2048
 #define MT7925_TX_MCU_RING_SIZE		256

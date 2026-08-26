@@ -228,7 +228,6 @@ struct mt792x_phy {
 	u8 slottime;
 
 	u32 rxfilter;
-
 	u32 rx_ampdu_ts;
 	u32 ampdu_ref;
 
