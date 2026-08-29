@@ -21,6 +21,21 @@ f6cf5faf  # firmware: update MT7996 firmware to version 20260311
 # and show-picks offers it as something we are missing. At that point it wants
 # a line in section 1, with the reason being that we already carry it.
 
+# mt7921: fix lock inversion between dev->mutex and iflist_mtx
+#   Merged 2026-08-28. Accepted upstream, waiting in Felix's mt76-fixes.
+#   On the list since 2026-08-10.
+#   https://lore.kernel.org/linux-wireless/20260810045338.118923-2-lucid_duck@justthetip.ca/
+
+# mt7925: fix lock inversion between dev->mutex and iflist_mtx
+#   Merged 2026-08-28. Accepted upstream, waiting in Felix's mt76-fixes.
+#   On the list since 2026-08-10.
+#   https://lore.kernel.org/linux-wireless/20260810045338.118923-3-lucid_duck@justthetip.ca/
+
+# mt7925: check drv_pmctrl return in the PCIe reset path
+#   Merged 2026-08-28. Accepted upstream, waiting in Felix's mt76-fixes.
+#   On the list since 2026-08-09.
+#   https://lore.kernel.org/linux-wireless/20260809205559.32116-1-lucid_duck@justthetip.ca/
+
 # mt7921: check drv_pmctrl return in the PCIe reset path
 #   Merged 2026-08-26. Reported and tested by moosager on their own
 #   hardware. On the list since 2026-08-09.
