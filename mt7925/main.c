@@ -805,7 +805,7 @@ mt7925_monitor_update_chan(struct mt792x_vif *mvif,
  * follows channel/band changes across 2.4/5/6 GHz, not just the band it was
  * first enabled on. Caller must hold dev->mt76.mutex.
  */
-static void
+void
 mt7925_monitor_arm_sniffer(struct mt792x_phy *phy, struct ieee80211_vif *vif,
 			   struct ieee80211_chanctx_conf *ctx)
 {
@@ -872,6 +872,29 @@ mt7925_sniffer_interface_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
 
 	if (monitor)
 		mt7925_mcu_set_beacon_filter(dev, vif, false);
+}
+
+/* Re-arm a monitor vif's firmware sniffer after a chip reset. Unlike
+ * mt7925_sniffer_interface_iter() above, this does not gate on
+ * hw->conf.flags & IEEE80211_CONF_MONITOR: this driver sets
+ * NO_VIRTUAL_MONITOR unconditionally, and mac80211's iface.c only ever
+ * sets that hw conf bit on the *virtual*-monitor path, which
+ * NO_VIRTUAL_MONITOR skips entirely - so the bit is always clear here
+ * and that check silently never fires for a real monitor vif. Checking
+ * vif->type directly is what mt7925_assign_vif_chanctx() already does
+ * for the same reason.
+ */
+void
+mt7925_monitor_reset_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
+{
+	struct mt792x_dev *dev = priv;
+	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
+	struct ieee80211_chanctx_conf *ctx = mvif->bss_conf.mt76.ctx;
+
+	if (vif->type != NL80211_IFTYPE_MONITOR || !ctx)
+		return;
+
+	mt7925_monitor_arm_sniffer(&dev->phy, vif, ctx);
 }
 
 void mt7925_set_runtime_pm(struct mt792x_dev *dev)
