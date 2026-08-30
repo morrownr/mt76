@@ -49,14 +49,32 @@ static void mt7925e_unregister_device(struct mt792x_dev *dev)
 
 	cancel_work_sync(&dev->reset_work);
 	cancel_work_sync(&dev->init_work);
+	__mt792x_mcu_drv_pmctrl(dev);
 	mt76_unregister_device(&dev->mt76);
-	mt76_for_each_q_rx(&dev->mt76, i)
-		napi_disable(&dev->mt76.napi[i]);
 	cancel_delayed_work_sync(&pm->ps_work);
 	cancel_delayed_work_sync(&dev->mlo_pm_work);
 	cancel_work_sync(&pm->wake_work);
 
+	/* Quiesce RX NAPI before tx_token_put()'s idr_destroy(): a still
+	 * in-flight poll can reach PKT_TYPE_TXRX_NOTIFY -> mt76_token_release()
+	 * -> idr_remove() on the same idr, racing idr_destroy() below
+	 * (morrownr/mt76 PR #70 review, Sashiko/Lucid-Duck).
+	 */
+	mt76_for_each_q_rx(&dev->mt76, i)
+		napi_disable(&dev->mt76.napi[i]);
+
 	mt7925_tx_token_put(dev);
+
+	/* Re-assert driver ownership: mt76_unregister_device() above can run
+	 * vif teardown that queues pm->ps_work, which can hand ownership back
+	 * to firmware before cancel_delayed_work_sync(&pm->ps_work) catches
+	 * it. The __mt792x_mcu_drv_pmctrl() call before mt76_unregister_device()
+	 * is new, added because that teardown itself needs driver ownership
+	 * too; this one, right before mt792x_dma_cleanup()/mt792x_wfsys_reset()
+	 * below (which do raw WFDMA/WFSYS register I/O), is unchanged from
+	 * before this fix and guarantees ownership is fresh at the point it's
+	 * actually needed, independent of what ps_work did during teardown.
+	 */
 	__mt792x_mcu_drv_pmctrl(dev);
 	mt792x_dma_cleanup(dev);
 	mt792x_wfsys_reset(dev);
@@ -647,6 +665,9 @@ static int mt7925_pci_probe(struct pci_dev *pdev,
 
 	if (!mt7925_disable_aspm && mt76_pci_aspm_supported(pdev))
 		dev->aspm_supported = true;
+
+	if (is_mt7928(&dev->mt76))
+		dev->skip_wpdma_reinit = true;
 
 	ret = __mt792x_mcu_fw_pmctrl(dev);
 	if (ret)

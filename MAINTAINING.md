@@ -33,6 +33,17 @@ If you do want a PR, it's the branch you push to that keeps it from merging:
 
 The branch name is just a label. Nothing merges on its own. GitHub shows a "Compare & pull request" button, and the PR stays open until someone merges it.
 
+Before you merge it, click the Files changed tab at the top of the pull request. That shows exactly what is about to land, line by line, and it is where a change that only half made it across shows itself while it is still easy to put right.
+
+Once you do merge, GitHub leaves a Revert button on that same pull request page. A straight push to main never has one. That on its own is often reason enough to take the branch route for anything you are not completely sure of.
+
+Then go back to the directory you pushed from and pick up what went in:
+
+    git checkout main
+    git pull
+
+Without that pull, main on your machine is still sitting where it was before and the files on disk are the old ones. Anything you compare or copy across next would be measured against the wrong thing, which is a quiet way to lose work.
+
 ## Getting an unfinished fix to a tester
 
 Now and then you've got a fix that isn't ready to merge but you want one person to try it, a reporter on the exact adapter that's failing, say. Push it as a branch and point them at it so they can clone that branch and install, or build it and send them the module directly. It stays off main until their result says it's good.
@@ -70,6 +81,28 @@ cherry-pick makes a fresh copy of that one commit on top of where you are. It ge
 Short commit id or long, git takes any unique piece of it. Use the 12-character version when you write it down somewhere, it's long enough not to get mistaken for anything else.
 
 When a cherry-pick doesn't apply cleanly, it's almost always one of two shapes. Either openwrt changed a function we've wrapped in a compat guard, in which case keep their change and put the guard back around the new version. Or openwrt touched code we'd already patched a different way, which is rarer, and you look at both and decide what to keep.
+
+## Seeing what is left to pick
+
+    ./show-picks.sh
+
+Lists what openwrt/mt76 has that we do not, oldest first. It works out what is already here by
+reading the "cherry picked from commit" lines, which is why the -x above matters.
+
+For a commit we have decided not to take, put its id in skip-picks.txt with a reason:
+
+    2dd6e4c8  # MT7981 firmware, SoC part this tree does not ship
+
+It drops off the list and gets counted at the bottom instead, so the reason survives and nobody
+re-examines it in six months.
+
+## Deliberate differences from upstream
+
+Two spots in the tree are intentionally not what openwrt/mt76 (or Felix's tree) does. Both were changed on purpose, for a reason written down in the commit, and neither should get silently overwritten by a future cherry-pick.
+
+**RX NAPI is disabled once, not twice, on device removal.** mt7921e_unregister_device() and mt7925e_unregister_device() already disable every RX NAPI instance before mt76_dma_cleanup() runs. Upstream commit 332bbe9b2784 ("wifi: mt76: Disable napi when removing device"), 13b7e6a96a00 in mainline, added a second napi_disable() inside mt76_dma_cleanup() itself, and a second call with no napi_enable() in between hangs forever, because napi_disable() leaves NAPI_STATE_SCHED set until something clears it. We reverted that commit (#72). If a future cherry-pick from openwrt touches mt76_dma_cleanup() or either driver's unregister path, check whether it's reintroducing that same double-disable before taking it. mt7915 and any other driver that never disabled RX NAPI on its own before deleting it will regain the unload warnings that commit was written to fix, until mt7915 gets its own local napi_disable() the way mt7921e/mt7925e already have one.
+
+**mt792x sets NO_VIRTUAL_MONITOR, not WANT_MONITOR_VIF.** Upstream asks mac80211 for a virtual monitor vif on every mt792x chip. Felix's tree splits it by chip. We now skip the virtual monitor on all of them (#76). The reason: mac80211's ieee80211_set_monitor_channel() only assigns a real per-vif channel context to a monitor vif when NO_VIRTUAL_MONITOR is set; under WANT_MONITOR_VIF, an explicitly-created active monitor vif has no virtual-monitor state to attach to, so channel setup silently no-ops and active monitor never receives a chanctx or any beacons. NO_VIRTUAL_MONITOR fixes that; testing found no passive-monitor regression on mt7921 (USB and PCIe), mt7925 (USB), or MT7927 (all three bands). If a future cherry-pick touches the hw_set() calls in mt792x_core.c's init_wiphy and tries to reintroduce WANT_MONITOR_VIF or a per-chip split, keep NO_VIRTUAL_MONITOR unconditional unless upstream has separately fixed the underlying mac80211 gap for active monitor vifs.
 
 ## Keeping it building on old kernels
 

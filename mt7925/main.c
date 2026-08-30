@@ -187,19 +187,21 @@ mt7925_init_eht_caps(struct mt792x_phy *phy, enum nl80211_band band,
 		eht_cap_elem->phy_cap_info[0] |=
 			IEEE80211_EHT_PHY_CAP0_320MHZ_IN_6GHZ;
 
+	val = (sts > 3) ? sts - 1 : 3;
+
 	eht_cap_elem->phy_cap_info[0] |=
-		u8_encode_bits(u8_get_bits(sts - 1, BIT(0)),
+		u8_encode_bits(u8_get_bits(val, BIT(0)),
 			       IEEE80211_EHT_PHY_CAP0_BEAMFORMEE_SS_80MHZ_MASK);
 
 	eht_cap_elem->phy_cap_info[1] =
-		u8_encode_bits(u8_get_bits(sts - 1, GENMASK(2, 1)),
+		u8_encode_bits(u8_get_bits(val, GENMASK(2, 1)),
 			       IEEE80211_EHT_PHY_CAP1_BEAMFORMEE_SS_80MHZ_MASK) |
-		u8_encode_bits(sts - 1,
+		u8_encode_bits(val,
 			       IEEE80211_EHT_PHY_CAP1_BEAMFORMEE_SS_160MHZ_MASK);
 
 	if (band == NL80211_BAND_6GHZ && is_320mhz_supported(&phy->dev->mt76))
 		eht_cap_elem->phy_cap_info[1] |=
-			u8_encode_bits(sts - 1,
+			u8_encode_bits(val,
 				       IEEE80211_EHT_PHY_CAP1_BEAMFORMEE_SS_320MHZ_MASK);
 
 	eht_cap_elem->phy_cap_info[2] =
@@ -905,9 +907,9 @@ static int mt7925_config(struct ieee80211_hw *hw, u32 changed)
 	}
 
 	if (changed & IEEE80211_CONF_CHANGE_MONITOR) {
-		ieee80211_iterate_active_interfaces(hw,
-						    IEEE80211_IFACE_ITER_RESUME_ALL,
-						    mt7925_sniffer_interface_iter, dev);
+		ieee80211_iterate_active_interfaces_mtx(hw,
+							IEEE80211_IFACE_ITER_RESUME_ALL,
+							mt7925_sniffer_interface_iter, dev);
 	}
 
 out:
@@ -921,11 +923,11 @@ static void mt7925_configure_filter(struct ieee80211_hw *hw,
 				    unsigned int *total_flags,
 				    u64 multicast)
 {
-#define MT7925_FILTER_FCSFAIL    BIT(2)
 #define MT7925_FILTER_CONTROL    BIT(5)
 #define MT7925_FILTER_OTHER_BSS  BIT(6)
 #define MT7925_FILTER_ENABLE     BIT(31)
 	struct mt792x_dev *dev = mt792x_hw_dev(hw);
+	struct mt792x_phy *phy = mt792x_hw_phy(hw);
 	u32 flags = MT7925_FILTER_ENABLE;
 
 #define MT7925_FILTER(_fif, _type) do {			\
@@ -936,6 +938,12 @@ static void mt7925_configure_filter(struct ieee80211_hw *hw,
 	MT7925_FILTER(FIF_FCSFAIL, FCSFAIL);
 	MT7925_FILTER(FIF_CONTROL, CONTROL);
 	MT7925_FILTER(FIF_OTHER_BSS, OTHER_BSS);
+
+	/* Persist what mac80211 actually asked for so the firmware sniffer
+	 * config (mt7925_mcu_config_sniffer()) can honour it instead of
+	 * hardcoding drop_err.
+	 */
+	phy->rxfilter = flags;
 
 	mt792x_mutex_acquire(dev);
 	mt7925_mcu_set_rxfilter(dev, flags, 0, 0);

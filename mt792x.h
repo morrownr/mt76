@@ -175,6 +175,8 @@ struct mt792x_phy {
 	s16 coverage_class;
 	u8 slottime;
 
+	u32 rxfilter;
+
 	u32 rx_ampdu_ts;
 	u32 ampdu_ref;
 
@@ -273,6 +275,7 @@ struct mt792x_dev {
 	bool hif_idle:1;
 	bool hif_resumed:1;
 	bool regd_change:1;
+	bool skip_wpdma_reinit:1;
 	wait_queue_head_t wait;
 
 	struct work_struct init_work;

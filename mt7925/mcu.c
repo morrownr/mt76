@@ -469,6 +469,7 @@ mt7925_mcu_tx_done_event(struct mt792x_dev *dev, struct sk_buff *skb)
 		u8 rsv[3];
 		u8 data[];
 	} __packed * txs;
+	struct mt7928_uni_txdone_event *evt;
 	struct tlv *tlv;
 	u32 tlv_len;
 
@@ -479,8 +480,6 @@ mt7925_mcu_tx_done_event(struct mt792x_dev *dev, struct sk_buff *skb)
 	while (tlv_len > 0 && le16_to_cpu(tlv->len) <= tlv_len) {
 		switch (le16_to_cpu(tlv->tag)) {
 		case UNI_EVENT_TX_DONE_MSG:
-			struct mt7928_uni_txdone_event *evt;
-
 			if (!is_mt7928(&dev->mt76))
 				break;
 
@@ -2334,7 +2333,13 @@ int mt7925_mcu_config_sniffer(struct mt792x_vif *vif,
 			.len = cpu_to_le16(sizeof(req.tlv)),
 			.control_ch = chandef->chan->hw_value,
 			.center_ch = ieee80211_frequency_to_channel(freq1),
-			.drop_err = 1,
+			/* Only pass unfiltered/marginal frames when the
+			 * monitor userspace actually asked for them
+			 * (FIF_FCSFAIL, persisted by mt7925_configure_filter()).
+			 * Otherwise keep firmware's default drop behaviour.
+			 */
+			.drop_err = !(vif->phy->rxfilter &
+				      MT7925_FILTER_FCSFAIL),
 		},
 	};
 

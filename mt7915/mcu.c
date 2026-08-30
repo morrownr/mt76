@@ -1772,11 +1772,6 @@ int __mt7915_mcu_add_sta(struct mt7915_dev *dev, struct ieee80211_vif *vif,
 		mt7915_mcu_sta_bfee_tlv(dev, skb, vif, sta);
 	}
 
-	ret = mt7915_mcu_add_group(dev, vif, sta);
-	if (ret) {
-		dev_kfree_skb(skb);
-		return ret;
-	}
 out:
 	ret = mt76_connac_mcu_sta_wed_update(&dev->mt76, skb);
 	if (ret) {
@@ -1784,8 +1779,14 @@ out:
 		return ret;
 	}
 
-	return mt76_mcu_skb_send_msg(&dev->mt76, skb,
-				     MCU_EXT_CMD(STA_REC_UPDATE), true);
+	ret = mt76_mcu_skb_send_msg(&dev->mt76, skb,
+				    MCU_EXT_CMD(STA_REC_UPDATE), true);
+	if (ret || conn_state == CONN_STATE_DISCONNECT)
+		return ret;
+
+	mt7915_mcu_add_group(dev, vif, sta);
+
+	return 0;
 }
 
 int mt7915_mcu_wed_enable_rx_stats(struct mt7915_dev *dev)

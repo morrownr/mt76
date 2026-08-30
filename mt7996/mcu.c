@@ -2960,14 +2960,15 @@ int mt7996_mcu_add_sta(struct mt7996_dev *dev,
 		}
 	}
 
-	ret = mt7996_mcu_sta_init_vow(dev, &link->mt76, wcid);
-	if (ret) {
-		dev_kfree_skb(skb);
-		return ret;
-	}
 out:
-	return mt76_mcu_skb_send_msg(&dev->mt76, skb,
-				     MCU_WMWA_UNI_CMD(STA_REC_UPDATE), true);
+	ret = mt76_mcu_skb_send_msg(&dev->mt76, skb,
+				    MCU_WMWA_UNI_CMD(STA_REC_UPDATE), true);
+	if (ret || conn_state == CONN_STATE_DISCONNECT)
+		return ret;
+
+	mt7996_mcu_sta_init_vow(dev, &link->mt76, wcid);
+
+	return 0;
 }
 
 int mt7996_mcu_teardown_mld_sta(struct mt7996_dev *dev,
