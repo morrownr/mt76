@@ -1572,6 +1572,21 @@ out:
 	ieee80211_iterate_active_interfaces(hw,
 					    IEEE80211_IFACE_ITER_RESUME_ALL,
 					    mt7925_vif_connect_iter, NULL);
+	/*
+	 * mt7925_vif_connect_iter() only restores STATION/AP vifs. A chip
+	 * reset (triggered here by an MCU command timeout, e.g. firmware
+	 * silently wedging mid-capture) reloads firmware from scratch and
+	 * drops the sniffer's armed state, but a monitor vif's local
+	 * netdev/wiphy config (type, channel) survives untouched, so it
+	 * keeps looking healthy while producing zero packets. Re-arm any
+	 * monitor vif the same way mt7925_assign_vif_chanctx() does on a
+	 * fresh channel assignment, so it actually recovers instead of
+	 * silently staying dead until a manual rmmod/insmod.
+	 */
+	mutex_lock(&dev->mt76.mutex);
+	ieee80211_iterate_active_interfaces(hw, IEEE80211_IFACE_ITER_RESUME_ALL,
+					    mt7925_monitor_reset_iter, dev);
+	mutex_unlock(&dev->mt76.mutex);
 	mt76_connac_power_save_sched(&dev->mt76.phy, pm);
 
 	mt7925_regd_change(&dev->phy, "00");
