@@ -7,6 +7,14 @@ Based on [openwrt/mt76](https://github.com/openwrt/mt76), adapted for
 standalone out-of-tree building by the
 [morrownr](https://github.com/morrownr) community.
 
+For companies, organizations or individuals seeking an engineer to do professional contract work:
+
+```
+Contract work: Linux wireless drivers. Lab testing, patches, and ongoing support.
+lucid_duck@justthetip.ca
+https://github.com/Lucid-Duck
+```
+
 ## Quick Start
 
 ```sh
