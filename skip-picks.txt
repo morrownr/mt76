@@ -50,6 +50,6 @@ f6cf5faf  # firmware: update MT7996 firmware to version 20260311
 #   https://lore.kernel.org/linux-wireless/20260826092755.480190-1-markanthonyagarro@gmail.com/
 
 # mt7921: honour FIF_FCSFAIL instead of hardcoding drop_err
-#   Merged 2026-09-05. Accepted upstream, waiting in Felix's mt76-fixes.
+#   Merged 2026-09-06. Accepted upstream, waiting in Felix's mt76-fixes.
 #   On the list since 2026-08-26.
 #   https://lore.kernel.org/linux-wireless/20260826231029.39632-1-lucid_duck@justthetip.ca/
