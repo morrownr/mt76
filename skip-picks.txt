@@ -53,3 +53,10 @@ f6cf5faf  # firmware: update MT7996 firmware to version 20260311
 #   Merged 2026-09-06. Accepted upstream, waiting in Felix's mt76-fixes.
 #   On the list since 2026-08-26.
 #   https://lore.kernel.org/linux-wireless/20260826231029.39632-1-lucid_duck@justthetip.ca/
+
+# mt792x: fix UAF in SDIO TX path when out of memory
+# mt76: fix memory leak in USB TX path
+#   Eason Lai's pair, carried 2026-09-08 for issue 83. On the list since
+#   2026-08-05, at v4 since 2026-08-27.
+#   https://lore.kernel.org/linux-wireless/20260827083526.1621600-2-eason.lai@mediatek.com/
+#   https://lore.kernel.org/linux-wireless/20260827083526.1621600-3-eason.lai@mediatek.com/
