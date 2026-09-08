@@ -152,6 +152,15 @@ fi
 
 printf "  Kernel:  %s (%s)\n" "${KVER}" "${KARCH}"
 
+# the compiler the kernel was built with decides which compiler can build
+# modules for it (see the clang note in the prerequisite check below)
+KCONFIG="/lib/modules/${KVER}/build/.config"
+KERNEL_CC=""
+if [ -f "${KCONFIG}" ]; then
+	KERNEL_CC=$(sed -n 's/^CONFIG_CC_VERSION_TEXT="\(.*\)"$/\1/p' "${KCONFIG}")
+	[ -n "${KERNEL_CC}" ] && printf "  Built:   %s\n" "${KERNEL_CC}"
+fi
+
 # kernel parameters
 if [ -f /proc/cmdline ]; then
 	KPARAMS=$(sed 's/root=[^ ]*//;s/[ ]\+/, /g;s/^BOOT_IMAGE=[^ ]*//' /proc/cmdline | sed 's/^, //')
@@ -286,6 +295,26 @@ if ! command -v bc >/dev/null 2>&1; then
 fi
 if ! command -v make >/dev/null 2>&1; then
 	MISSING="${MISSING} make"
+fi
+
+# A kernel built with clang (CachyOS, Chimera) makes
+# kbuild pass clang-only flags to whatever compiler builds a module, so gcc
+# fails on it with "unrecognized command-line option -mstack-alignment=8".
+# The Makefile switches the build to clang on its own; it just needs the
+# tools installed. Package names are the same on Arch, Debian and Fedora.
+if [ -f "${KCONFIG}" ] && grep -q '^CONFIG_CC_IS_CLANG=y' "${KCONFIG}"; then
+	for tool in clang ld.lld llvm-ar; do
+		if ! command -v "${tool}" >/dev/null 2>&1; then
+			case "${tool}" in
+				clang)   MISSING="${MISSING} clang" ;;
+				ld.lld)  MISSING="${MISSING} lld" ;;
+				llvm-ar) MISSING="${MISSING} llvm" ;;
+			esac
+		fi
+	done
+	if [ -n "${MISSING}" ]; then
+		printf '  This kernel was built with clang, so its modules must be too.\n'
+	fi
 fi
 
 if [ -n "${MISSING}" ]; then

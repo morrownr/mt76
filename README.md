@@ -163,6 +163,14 @@ The installer checks for all of these automatically:
 - Kernel header files for your running kernel
 - Optional: `dkms` for automatic rebuilds on kernel updates
 
+**Kernels built with clang** (CachyOS, Chimera) need
+their modules built with clang too. The Makefile detects this from the kernel's
+config and switches to `LLVM=1` on its own, for `make`, `install-driver.sh` and
+dkms alike. Install `clang`, `lld` and `llvm` first; the package names are the
+same on Arch, Debian and Fedora. The tell that you are on such a kernel and the
+tools are missing is gcc failing with `unrecognized command-line option
+'-mstack-alignment=8'`.
+
 ## Reporting Issues
 
 Run `check-driver.sh` and include the full output in your bug report:
