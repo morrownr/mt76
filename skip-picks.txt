@@ -4,6 +4,7 @@
 2dd6e4c8  # firmware: update MT7981 firmware to version 20260515
 50a0c305  # firmware: update MT7986 firmware to version 20260515
 f6cf5faf  # firmware: update MT7996 firmware to version 20260311
+9de65849  # do not advertise active monitor. Fixed here instead, so this would switch it off
 
 # Section 2. Experimental/testing patches that have been merged here but have
 # not been sent upstream yet.
