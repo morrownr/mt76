@@ -104,6 +104,16 @@ else
 
 KVER ?= $(shell uname -r)
 KDIR ?= /lib/modules/$(KVER)/build
+
+# A kernel built with clang records that in its config, and kbuild then
+# emits clang-only flags for every module built against it, whichever
+# compiler is doing the building. So a clang kernel needs a clang module
+# build. Detect it here so make, install-driver.sh and dkms all get it
+# without the user having to know. Override with LLVM= on the command line.
+ifeq ($(shell grep -qs '^CONFIG_CC_IS_CLANG=y' $(KDIR)/.config && echo y),y)
+LLVM ?= 1
+export LLVM
+endif
 MODDIR ?= /lib/modules/$(KVER)/extra/mt76
 FWDIR := /lib/firmware/mediatek
 NPROC ?= $(shell nproc --ignore=1)
