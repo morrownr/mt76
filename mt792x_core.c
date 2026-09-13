@@ -757,7 +757,10 @@ int mt792x_init_wiphy(struct ieee80211_hw *hw)
 	 * MT7927 path. Verified on hardware: active monitor now gets a real
 	 * chanctx and receives beacons at the same rate as passive monitor.
 	 */
+/* compat: IEEE80211_HW_NO_VIRTUAL_MONITOR added to mac80211 in kernel 6.13 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	ieee80211_hw_set(hw, NO_VIRTUAL_MONITOR);
+#endif
 	ieee80211_hw_set(hw, SUPPORTS_PS);
 	ieee80211_hw_set(hw, SUPPORTS_DYNAMIC_PS);
 	ieee80211_hw_set(hw, SUPPORTS_VHT_EXT_NSS_BW);
