@@ -158,7 +158,6 @@ The installer checks for all of these automatically:
 
 - `gcc` -- C compiler
 - `make` -- build tool
-- `bc` -- used by kernel build system
 - `iw` -- wireless configuration tool
 - Kernel header files for your running kernel
 - Optional: `dkms` for automatic rebuilds on kernel updates
