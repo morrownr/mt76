@@ -6,6 +6,23 @@
 f6cf5faf  # firmware: update MT7996 firmware to version 20260311
 9de65849  # do not advertise active monitor. Fixed here instead, so this would switch it off
 
+# Already in this tree, mostly under a different id or a slightly different
+# subject. Checked against the files, not the subject lines, since those do not
+# match. Verified 2026-09-26 at ca97efb.
+a3bf7dac  # mt7921 assert sniffer on chanctx change. Carried here as 903b0591
+900f4077  # mt7925 drop TXRX_NOTIFY on non-mmio. Carried here as a0419936, PR #67
+6ae90289  # mt7615 drop TXRX_NOTIFY on non-mmio. Same commit, a0419936, PR #67
+2d9b52d2  # restrict NPU/PPE active checks to MMIO. Carried here as c5ec2a3c, PR #57
+9abd11a8  # the mt76 half of the EMLSR rename. Handled here by cd136bff, PR #60
+b9533b83  # mt7921u MT7902 USB support. Carried here as 2ab79b3c
+e1f87cf2  # mt76x2u ELECOM WDC-867SU3S. Carried here as f363f279
+5d68813e  # mt7921 iflist_mtx lock inversion, ours. Carried here as cd85809e
+699df2ce  # mt7925 iflist_mtx lock inversion, ours. Carried here as 1d0e7dfc
+8e856ad9  # mt7921 drv_pmctrl return check, ours. Carried here as 7ed31911
+4f2aa991  # mt7925 drv_pmctrl return check, ours. Carried here as 095fb1e0
+6d1c6a75  # the napi revert. Carried here as a00e99cf, PR #72
+a6e5a072  # mt7921 FIF_FCSFAIL, ours. Carried here as 3dcd2f14
+
 # Section 2. Experimental/testing patches that have been merged here but have
 # not been sent upstream yet.
 #
