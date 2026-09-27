@@ -290,9 +290,6 @@ fi
 if ! command -v iw >/dev/null 2>&1; then
 	MISSING="${MISSING} iw"
 fi
-if ! command -v bc >/dev/null 2>&1; then
-	MISSING="${MISSING} bc"
-fi
 if ! command -v make >/dev/null 2>&1; then
 	MISSING="${MISSING} make"
 fi
