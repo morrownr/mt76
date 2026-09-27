@@ -23,6 +23,12 @@ e1f87cf2  # mt76x2u ELECOM WDC-867SU3S. Carried here as f363f279
 6d1c6a75  # the napi revert. Carried here as a00e99cf, PR #72
 a6e5a072  # mt7921 FIF_FCSFAIL, ours. Carried here as 3dcd2f14
 
+# The rest of Nick's sixteen from issue 32. Verified 2026-09-27 at 3204d1e9,
+# against the files, not the subject lines.
+012e52ae  # mt76x02u hrtimer_setup. Already here behind a 6.13 guard this would remove
+d367ee6d  # mt7921 drop TXRX_NOTIFY on non-mmio, ours. Carried here as 002723b6
+d2b01fbc  # pass the LED define via ccflags-y. Top-level Makefile already uses it
+
 # Section 2. Experimental/testing patches that have been merged here but have
 # not been sent upstream yet.
 #
