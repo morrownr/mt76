@@ -116,7 +116,8 @@ fi
 
 if [ "$nblocked" -gt 0 ]; then
     echo "The rest are in picks-blocked.txt with the file that stops each one."
-    top=$(awk '{print $2}' "$blocked" | sort | uniq -c | sort -rn | head -1)
+    top=$(sed 's/ [a-z0-9]*: .*//' "$blocked" | cut -d' ' -f2- \
+        | tr ' ' '\n' | grep . | sort | uniq -c | sort -rn | head -1)
     topn=$(printf '%s\n' "$top" | awk '{print $1}')
     topf=$(printf '%s\n' "$top" | awk '{print $2}')
     if [ "${topn:-0}" -gt 2 ]; then
