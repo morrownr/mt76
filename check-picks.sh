@@ -149,25 +149,26 @@ fi
 printf '  %s will not apply\n' "$nblocked"
 echo
 
-if [ "$buildable" = no ] && [ "$nclean" -gt 0 ]; then
-    echo "The build check was SKIPPED. make failed on this tree before any pick"
-    echo "was added, so there is no kernel here to build against and the list"
-    echo "below is apply-tested only. 302d9cb2 is the reason that matters: it"
-    echo "takes no conflict and then includes a header this tree has never had."
+if [ "$nclean" -gt 0 ] && [ "$buildable" = no ]; then
+    echo "No line to paste, because nothing could be built. make failed on this"
+    echo "tree before any pick was added, so there is no kernel here to build"
+    echo "against. Applying is not building: 302d9cb2 takes no conflict and then"
+    echo "includes a header this tree has never had."
+    echo
+    echo "Install the headers for the kernel you are running and run this again"
+    echo "and you get a line that has been built."
+    echo
+    echo "The $nclean that apply are in picks-clean.txt if you want to look."
     echo
 fi
 
-if [ "$nclean" -gt 0 ]; then
+if [ "$nclean" -gt 0 ] && [ "$buildable" = yes ]; then
     echo "To take all of them, oldest first, copy and paste this line:"
     echo
     printf '    git cherry-pick -x %s\n' "$(tr '\n' ' ' < "$clean" | sed 's/ *$//')"
     echo
-    if [ "$buildable" = yes ]; then
-        echo "Each one was built here before it went on that line. Build again on"
-        echo "your own kernel before you push, this tree supports several."
-    else
-        echo "None of them were built. Build before you push."
-    fi
+    echo "Every one of them was built here before it went on that line. Build"
+    echo "again on your own kernel before you push, this tree supports several."
     echo
 fi
 
