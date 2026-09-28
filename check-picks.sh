@@ -93,14 +93,45 @@ printf '%s\n' "$todo" | while read -r full short subject; do
     git -C "$scratch" reset -q --hard HEAD
 done
 
+# Applying is not the same as building. 4f05b869 applied cleanly and still
+# broke the build below 7.1, and 302d9cb2 applies cleanly then includes a
+# header from a series this tree never took. So build each one before
+# offering it.
+broke=$(dirname "$0")/picks-broken.txt
+: > "$broke"
+if [ -s "$clean" ]; then
+    echo "Building them ..."
+    while read -r short; do
+        [ -z "$short" ] && continue
+        git -C "$scratch" cherry-pick -x "$short" >/dev/null 2>&1 </dev/null || {
+            git -C "$scratch" cherry-pick --abort >/dev/null 2>&1 </dev/null
+            continue
+        }
+        if make -C "$scratch" >/dev/null 2>&1 </dev/null; then
+            continue
+        fi
+        why=$(make -C "$scratch" 2>&1 </dev/null | sed -n 's/.*error: //p' | head -1)
+        printf '%-10s %s\n' "$short" "${why:-build failed}" >> "$broke"
+        git -C "$scratch" reset -q --hard HEAD~1 </dev/null
+    done < "$clean"
+    make -C "$scratch" clean >/dev/null 2>&1
+    if [ -s "$broke" ]; then
+        awk '{print $1}' "$broke" > "$scratch/.broken-ids"
+        grep -v -x -F -f "$scratch/.broken-ids" "$clean" > "$clean.keep"
+        mv "$clean.keep" "$clean"
+    fi
+fi
+
 git worktree remove --force "$scratch" >/dev/null 2>&1
 rmdir "$scratch" 2>/dev/null
 
+nbroke=$(grep -c . "$broke")
 nclean=$(grep -c . "$clean")
 nblocked=$(grep -c . "$blocked")
 
 echo
-printf '  %s apply cleanly\n' "$nclean"
+printf '  %s apply cleanly and build\n' "$nclean"
+[ "$nbroke" -gt 0 ] && printf '  %s apply cleanly but break the build\n' "$nbroke"
 printf '  %s will not apply\n' "$nblocked"
 echo
 
@@ -109,8 +140,16 @@ if [ "$nclean" -gt 0 ]; then
     echo
     printf '    git cherry-pick -x %s\n' "$(tr '\n' ' ' < "$clean" | sed 's/ *$//')"
     echo
-    echo "Build before you push. The NAN commit applied cleanly and still"
-    echo "broke the build on kernels below 7.1."
+    echo "Each one was built here before it went on that line. Build again on"
+    echo "your own kernel before you push, this tree supports several."
+    echo
+fi
+
+if [ "$nbroke" -gt 0 ]; then
+    echo "These apply with no conflict and then break the build, so they are"
+    echo "left off the line above. They are in picks-broken.txt:"
+    echo
+    sed 's/^/    /' "$broke"
     echo
 fi
 
