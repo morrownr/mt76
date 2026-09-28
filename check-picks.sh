@@ -99,8 +99,17 @@ done
 # offering it.
 broke=$(dirname "$0")/picks-broken.txt
 : > "$broke"
+buildable=no
 if [ -s "$clean" ]; then
-    echo "Building them ..."
+    # Build the tree as it stands first. If that fails there is no kernel to
+    # build against, and without this check every pick gets blamed for it.
+    if make -C "$scratch" >/dev/null 2>&1 </dev/null; then
+        buildable=yes
+    fi
+fi
+
+if [ "$buildable" = yes ]; then
+    echo "Building each one, this takes a few minutes ..."
     while read -r short; do
         [ -z "$short" ] && continue
         git -C "$scratch" cherry-pick -x "$short" >/dev/null 2>&1 </dev/null || {
@@ -125,23 +134,40 @@ fi
 git worktree remove --force "$scratch" >/dev/null 2>&1
 rmdir "$scratch" 2>/dev/null
 
-nbroke=$(grep -c . "$broke")
+[ -s "$broke" ] || rm -f "$broke"
+nbroke=$([ -f "$broke" ] && grep -c . "$broke" || echo 0)
 nclean=$(grep -c . "$clean")
 nblocked=$(grep -c . "$blocked")
 
 echo
-printf '  %s apply cleanly and build\n' "$nclean"
+if [ "$buildable" = yes ]; then
+    printf '  %s apply cleanly and build\n' "$nclean"
+else
+    printf '  %s apply cleanly, not build-tested\n' "$nclean"
+fi
 [ "$nbroke" -gt 0 ] && printf '  %s apply cleanly but break the build\n' "$nbroke"
 printf '  %s will not apply\n' "$nblocked"
 echo
+
+if [ "$buildable" = no ] && [ "$nclean" -gt 0 ]; then
+    echo "The build check was SKIPPED. make failed on this tree before any pick"
+    echo "was added, so there is no kernel here to build against and the list"
+    echo "below is apply-tested only. 302d9cb2 is the reason that matters: it"
+    echo "takes no conflict and then includes a header this tree has never had."
+    echo
+fi
 
 if [ "$nclean" -gt 0 ]; then
     echo "To take all of them, oldest first, copy and paste this line:"
     echo
     printf '    git cherry-pick -x %s\n' "$(tr '\n' ' ' < "$clean" | sed 's/ *$//')"
     echo
-    echo "Each one was built here before it went on that line. Build again on"
-    echo "your own kernel before you push, this tree supports several."
+    if [ "$buildable" = yes ]; then
+        echo "Each one was built here before it went on that line. Build again on"
+        echo "your own kernel before you push, this tree supports several."
+    else
+        echo "None of them were built. Build before you push."
+    fi
     echo
 fi
 
