@@ -34,6 +34,15 @@ if ! git remote | grep -qx "$REMOTE"; then
     exit 1
 fi
 
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+    echo "This is a shallow clone, so the history that says what has already"
+    echo "been picked is not here and every commit would be listed. Deepen it:"
+    echo
+    echo "    git fetch --unshallow"
+    echo
+    exit 1
+fi
+
 skipfile=$(dirname "$0")/skip-picks.txt
 skiplist=""
 if [ -f "$skipfile" ]; then
@@ -61,6 +70,12 @@ is_skipped() {
 echo "Fetching $REMOTE ..."
 if ! git fetch -q "$REMOTE"; then
     echo "Could not fetch $REMOTE. Check your connection and the remote URL."
+    exit 1
+fi
+
+if ! git merge-base HEAD "$REMOTE/$BRANCH" >/dev/null 2>&1; then
+    echo "This tree and $REMOTE/$BRANCH share no history, so there is nothing"
+    echo "to compare. Check that $REMOTE points at the openwrt mt76 repo."
     exit 1
 fi
 
