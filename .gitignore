@@ -43,3 +43,4 @@ tmp_fw/
 .*.swp
 picks-clean.txt
 picks-blocked.txt
+picks-broken.txt

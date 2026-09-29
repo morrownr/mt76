@@ -93,24 +93,90 @@ printf '%s\n' "$todo" | while read -r full short subject; do
     git -C "$scratch" reset -q --hard HEAD
 done
 
+# Applying is not the same as building. 4f05b869 applied cleanly and still
+# broke the build below 7.1, and 302d9cb2 applies cleanly then includes a
+# header from a series this tree never took. So build each one before
+# offering it.
+broke=$(dirname "$0")/picks-broken.txt
+: > "$broke"
+buildable=no
+if [ -s "$clean" ]; then
+    # Build the tree as it stands first. If that fails there is no kernel to
+    # build against, and without this check every pick gets blamed for it.
+    if make -C "$scratch" >/dev/null 2>&1 </dev/null; then
+        buildable=yes
+    fi
+fi
+
+if [ "$buildable" = yes ]; then
+    echo "Building each one, this takes a few minutes ..."
+    while read -r short; do
+        [ -z "$short" ] && continue
+        git -C "$scratch" cherry-pick -x "$short" >/dev/null 2>&1 </dev/null || {
+            git -C "$scratch" cherry-pick --abort >/dev/null 2>&1 </dev/null
+            continue
+        }
+        if make -C "$scratch" >/dev/null 2>&1 </dev/null; then
+            continue
+        fi
+        why=$(make -C "$scratch" 2>&1 </dev/null | sed -n 's/.*error: //p' | head -1)
+        printf '%-10s %s\n' "$short" "${why:-build failed}" >> "$broke"
+        git -C "$scratch" reset -q --hard HEAD~1 </dev/null
+    done < "$clean"
+    make -C "$scratch" clean >/dev/null 2>&1
+    if [ -s "$broke" ]; then
+        awk '{print $1}' "$broke" > "$scratch/.broken-ids"
+        grep -v -x -F -f "$scratch/.broken-ids" "$clean" > "$clean.keep"
+        mv "$clean.keep" "$clean"
+    fi
+fi
+
 git worktree remove --force "$scratch" >/dev/null 2>&1
 rmdir "$scratch" 2>/dev/null
 
+[ -s "$broke" ] || rm -f "$broke"
+nbroke=$([ -f "$broke" ] && grep -c . "$broke" || echo 0)
 nclean=$(grep -c . "$clean")
 nblocked=$(grep -c . "$blocked")
 
 echo
-printf '  %s apply cleanly\n' "$nclean"
+if [ "$buildable" = yes ]; then
+    printf '  %s apply cleanly and build\n' "$nclean"
+else
+    printf '  %s apply cleanly, not build-tested\n' "$nclean"
+fi
+[ "$nbroke" -gt 0 ] && printf '  %s apply cleanly but break the build\n' "$nbroke"
 printf '  %s will not apply\n' "$nblocked"
 echo
 
-if [ "$nclean" -gt 0 ]; then
+if [ "$nclean" -gt 0 ] && [ "$buildable" = no ]; then
+    echo "No line to paste, because nothing could be built. make failed on this"
+    echo "tree before any pick was added, so there is no kernel here to build"
+    echo "against. Applying is not building: 302d9cb2 takes no conflict and then"
+    echo "includes a header this tree has never had."
+    echo
+    echo "Install the headers for the kernel you are running and run this again"
+    echo "and you get a line that has been built."
+    echo
+    echo "The $nclean that apply are in picks-clean.txt if you want to look."
+    echo
+fi
+
+if [ "$nclean" -gt 0 ] && [ "$buildable" = yes ]; then
     echo "To take all of them, oldest first, copy and paste this line:"
     echo
     printf '    git cherry-pick -x %s\n' "$(tr '\n' ' ' < "$clean" | sed 's/ *$//')"
     echo
-    echo "Build before you push. The NAN commit applied cleanly and still"
-    echo "broke the build on kernels below 7.1."
+    echo "Every one of them was built here before it went on that line. Build"
+    echo "again on your own kernel before you push, this tree supports several."
+    echo
+fi
+
+if [ "$nbroke" -gt 0 ]; then
+    echo "These apply with no conflict and then break the build, so they are"
+    echo "left off the line above. They are in picks-broken.txt:"
+    echo
+    sed 's/^/    /' "$broke"
     echo
 fi
 
