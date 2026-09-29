@@ -40,8 +40,14 @@ static bool mt7925_mcu_wow_pattern_old_tlv(struct mt76_dev *dev)
 
 static bool mt7925_vif_is_nan(struct ieee80211_vif *vif)
 {
-	return vif->type == NL80211_IFTYPE_NAN ||
-	       vif->type == NL80211_IFTYPE_NAN_DATA;
+	if (vif->type == NL80211_IFTYPE_NAN)
+		return true;
+/* compat: NL80211_IFTYPE_NAN_DATA added to nl80211 in kernel 7.1 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
+	if (vif->type == NL80211_IFTYPE_NAN_DATA)
+		return true;
+#endif
+	return false;
 }
 
 int mt7925_mcu_parse_response(struct mt76_dev *mdev, int cmd,
@@ -706,9 +712,12 @@ mt7925_mcu_uni_rx_unsolicited_event(struct mt792x_dev *dev,
 		dev->fw_assert = true;
 		mt76_connac_mcu_coredump_event(&dev->mt76, skb, &dev->coredump);
 		return;
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 	case MCU_UNI_EVENT_NAN:
 		mt7925_nan_mcu_event(dev, skb);
 		break;
+#endif
 	default:
 		break;
 	}
@@ -2782,7 +2791,10 @@ mt7925_mcu_bss_basic_tlv(struct sk_buff *skb,
 		basic_req->active = true;
 		break;
 	case NL80211_IFTYPE_NAN:
+/* compat: NL80211_IFTYPE_NAN_DATA added to nl80211 in kernel 7.1 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
 	case NL80211_IFTYPE_NAN_DATA:
+#endif
 		basic_req->conn_type = cpu_to_le32(CONNECTION_NAN);
 		basic_req->active = enable;
 		break;

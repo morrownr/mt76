@@ -67,6 +67,8 @@ static const struct ieee80211_iface_limit if_limits_chanctx_scc[] = {
 	}
 };
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 static const struct ieee80211_iface_limit if_limits_nan_mcc[] = {
 	{
 		.max = 2,
@@ -100,6 +102,7 @@ static const struct ieee80211_iface_limit if_limits_nan_scc[] = {
 		.types = BIT(NL80211_IFTYPE_AP),
 	},
 };
+#endif
 
 static const struct ieee80211_iface_combination if_comb_chanctx_base[] = {
 	{
@@ -118,6 +121,8 @@ static const struct ieee80211_iface_combination if_comb_chanctx_base[] = {
 	}
 };
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 static const struct ieee80211_iface_combination if_comb_chanctx_nan[] = {
 	{
 		.limits = if_limits_nan_mcc,
@@ -134,15 +139,19 @@ static const struct ieee80211_iface_combination if_comb_chanctx_nan[] = {
 		.beacon_int_infra_match = false,
 	},
 };
+#endif
 
 static int mt792x_setup_iface_combinations(struct mt792x_dev *dev,
 					   struct wiphy *wiphy)
 {
 	const bool cnm = !!(dev->fw_features & MT792x_FW_CAP_CNM);
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 	const bool nan = !!(dev->fw_features & MT792x_FW_CAP_NAN);
 	const int n_base = ARRAY_SIZE(if_comb_chanctx_base);
 	const int n_nan = ARRAY_SIZE(if_comb_chanctx_nan);
 	struct ieee80211_iface_combination *comb;
+#endif
 
 	if (!cnm) {
 		dev->iface_combinations = if_comb;
@@ -150,6 +159,12 @@ static int mt792x_setup_iface_combinations(struct mt792x_dev *dev,
 		return 0;
 	}
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 2, 0)
+	dev->iface_combinations = if_comb_chanctx_base;
+	dev->n_iface_combinations = ARRAY_SIZE(if_comb_chanctx_base);
+	return 0;
+#else
 	/* CNM enabled, NAN optional */
 	if (!nan) {
 		dev->iface_combinations = if_comb_chanctx_base;
@@ -170,6 +185,7 @@ static int mt792x_setup_iface_combinations(struct mt792x_dev *dev,
 	dev->n_iface_combinations = n_base + n_nan;
 
 	return 0;
+#endif
 }
 
 void mt792x_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *control,
@@ -814,6 +830,8 @@ int mt792x_init_wiphy(struct ieee80211_hw *hw)
 				 BIT(NL80211_IFTYPE_P2P_GO) |
 				 BIT(NL80211_IFTYPE_P2P_DEVICE);
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 	if ((dev->fw_features & MT792x_FW_CAP_CNM) &&
 	    (dev->fw_features & MT792x_FW_CAP_NAN)) {
 		wiphy->interface_modes |= BIT(NL80211_IFTYPE_NAN) |
@@ -828,6 +846,7 @@ int mt792x_init_wiphy(struct ieee80211_hw *hw)
 		wiphy->nan_capa.dev_capabilities = NAN_DEV_CAPA_EXT_KEY_ID_SUPPORTED;
 		wiphy_ext_feature_set(wiphy, NL80211_EXT_FEATURE_SECURE_NAN);
 	}
+#endif
 
 	wiphy->max_scan_ie_len = MT76_CONNAC_SCAN_IE_LEN;
 	wiphy->max_scan_ssids = 4;

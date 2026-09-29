@@ -123,6 +123,8 @@ struct mt792x_link_sta {
 	struct ieee80211_link_sta *pri_link;
 };
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 struct mt792x_sta_nan_sched {
 	/* protects NAN peer schedule state */
 	u16 committed_dw;
@@ -136,6 +138,7 @@ struct mt792x_sta_nan_sched {
 		struct cfg80211_chan_def chans[CFG80211_NAN_SCHED_NUM_TIME_SLOTS];
 	} maps[CFG80211_NAN_MAX_PEER_MAPS];
 };
+#endif
 
 struct mt792x_sta {
 	struct mt792x_link_sta deflink; /* must be first */
@@ -146,8 +149,11 @@ struct mt792x_sta {
 	u16 valid_links;
 	u8 deflink_id;
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 	/* NAN peer schedule */
 	struct mt792x_sta_nan_sched nan_sched;
+#endif
 };
 
 DECLARE_EWMA(rssi, 10, 8);
@@ -164,6 +170,8 @@ struct mt792x_bss_conf {
 	unsigned int link_id;
 };
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 struct mt792x_nan_conf {
 	u8 master_pref;
 	u8 bands;
@@ -182,6 +190,7 @@ struct mt792x_nan {
 	/* Connection index bitmap, up to NAN_MAX_CONN_CFG peers */
 	unsigned long conn_bitmap;
 };
+#endif
 
 struct mt792x_vif {
 	struct mt792x_bss_conf bss_conf; /* must be first */
@@ -198,7 +207,10 @@ struct mt792x_vif {
 	struct work_struct csa_work;
 	struct timer_list csa_timer;
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 	struct mt792x_nan nan;
+#endif
 };
 
 struct mt792x_phy {
