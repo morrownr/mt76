@@ -23,6 +23,7 @@
 #define MT792x_CFEND_RATE_11B		0x03	/* 11B LP, 11M */
 
 #define MT792x_FW_TAG_FEATURE	4
+#define MT792x_FW_CAP_NAN	BIT(5)
 #define MT792x_FW_CAP_CNM	BIT(7)
 
 #define MT792x_CHIP_CAP_CLC_EVT_EN BIT(0)
@@ -122,6 +123,23 @@ struct mt792x_link_sta {
 	struct ieee80211_link_sta *pri_link;
 };
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+struct mt792x_sta_nan_sched {
+	/* protects NAN peer schedule state */
+	u16 committed_dw;
+	u32 sch_idx;
+	bool idx_assigned;
+	unsigned long ndp_ctx_bitmap;
+	bool ndp_ctx_assigned;
+	u8 ndp_ctx_id;		/* assigned NDP context ID (for NDI sta) */
+	struct {
+		u8 map_id;
+		struct cfg80211_chan_def chans[CFG80211_NAN_SCHED_NUM_TIME_SLOTS];
+	} maps[CFG80211_NAN_MAX_PEER_MAPS];
+};
+#endif
+
 struct mt792x_sta {
 	struct mt792x_link_sta deflink; /* must be first */
 	struct mt792x_link_sta __rcu *link[IEEE80211_MLD_MAX_NUM_LINKS];
@@ -130,6 +148,12 @@ struct mt792x_sta {
 
 	u16 valid_links;
 	u8 deflink_id;
+
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+	/* NAN peer schedule */
+	struct mt792x_sta_nan_sched nan_sched;
+#endif
 };
 
 DECLARE_EWMA(rssi, 10, 8);
@@ -146,6 +170,28 @@ struct mt792x_bss_conf {
 	unsigned int link_id;
 };
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+struct mt792x_nan_conf {
+	u8 master_pref;
+	u8 bands;
+	u8 cluster_id[ETH_ALEN];
+	u32 discovery_beacon_interval;
+	bool enable_dw_notification;
+};
+
+struct mt792x_nan {
+	struct mt792x_nan_conf conf;
+
+	/* Scheduler */
+	struct cfg80211_chan_def local_sched[CFG80211_NAN_SCHED_NUM_TIME_SLOTS];
+	u32 seq_id;
+
+	/* Connection index bitmap, up to NAN_MAX_CONN_CFG peers */
+	unsigned long conn_bitmap;
+};
+#endif
+
 struct mt792x_vif {
 	struct mt792x_bss_conf bss_conf; /* must be first */
 	struct mt792x_bss_conf __rcu *link_conf[IEEE80211_MLD_MAX_NUM_LINKS];
@@ -160,6 +206,11 @@ struct mt792x_vif {
 
 	struct work_struct csa_work;
 	struct timer_list csa_timer;
+
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+	struct mt792x_nan nan;
+#endif
 };
 
 struct mt792x_phy {
@@ -301,6 +352,18 @@ struct mt792x_dev {
 	u32 backup_l2;
 
 	struct ieee80211_chanctx_conf *new_ctx;
+
+	struct ieee80211_vif *nan_vif;
+	const struct ieee80211_iface_combination *iface_combinations;
+	int n_iface_combinations;
+	/* deferred NAN MCU events run out of the atomic RX path on one shared
+	 * work; see mt7925_nan_deferred_work() and enum mt7925_nan_deferred_event
+	 */
+	struct work_struct nan_deferred_work;
+	/* protects @nan_deferred_pending */
+	spinlock_t nan_deferred_lock;
+	unsigned long nan_deferred_pending;
+	u8 nan_started_cluster_id[ETH_ALEN];
 };
 
 static inline struct mt792x_bss_conf *

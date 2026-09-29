@@ -160,6 +160,36 @@ static int mt7925_init_hardware(struct mt792x_dev *dev)
 	return 0;
 }
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+static int mt7925_init_nan_cap(struct mt76_dev *mdev)
+{
+	struct mt792x_dev *dev = container_of(mdev, struct mt792x_dev, mt76);
+	const struct ieee80211_sta_he_cap *he_cap;
+	struct ieee80211_supported_band *sband;
+	struct wiphy *wiphy = mdev->hw->wiphy;
+
+	if (!(dev->fw_features & MT792x_FW_CAP_NAN))
+		return 0;
+
+	sband = wiphy->bands[NL80211_BAND_2GHZ];
+	if (sband)
+		wiphy->nan_capa.phy.ht = sband->ht_cap;
+
+	sband = wiphy->bands[NL80211_BAND_5GHZ];
+	if (sband)
+		wiphy->nan_capa.phy.vht = sband->vht_cap;
+
+	sband = wiphy->bands[NL80211_BAND_2GHZ];
+	he_cap = sband ? ieee80211_get_he_iftype_cap(sband, NL80211_IFTYPE_NAN)
+		       : NULL;
+	if (he_cap)
+		wiphy->nan_capa.phy.he = *he_cap;
+
+	return 0;
+}
+#endif
+
 static void mt7925_init_work(struct work_struct *work)
 {
 	struct mt792x_dev *dev = container_of(work, struct mt792x_dev,
@@ -179,6 +209,11 @@ static void mt7925_init_work(struct work_struct *work)
 		dev_err(dev->mt76.dev, "MLO init failed\n");
 		return;
 	}
+
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+	dev->mt76.init_wiphy = mt7925_init_nan_cap;
+#endif
 
 	ret = mt76_register_device(&dev->mt76, true, mt76_rates,
 				   ARRAY_SIZE(mt76_rates));
@@ -241,6 +276,11 @@ int mt7925_register_device(struct mt792x_dev *dev)
 
 	INIT_WORK(&dev->reset_work, mt7925_mac_reset_work);
 	INIT_WORK(&dev->init_work, mt7925_init_work);
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+	INIT_WORK(&dev->nan_deferred_work, mt7925_nan_deferred_work);
+	spin_lock_init(&dev->nan_deferred_lock);
+#endif
 
 	INIT_WORK(&dev->phy.roc_work, mt7925_roc_work);
 	timer_setup(&dev->phy.roc_timer, mt792x_roc_timer, 0);

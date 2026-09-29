@@ -348,6 +348,22 @@ failed:
 }
 #endif /* CONFIG_PM */
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+static void mt7925u_disconnect(struct usb_interface *usb_intf)
+{
+	struct mt792x_dev *dev = usb_get_intfdata(usb_intf);
+
+	/* mt792xu_disconnect() ends in mt76_free_device(), so the work has to
+	 * go before it rather than after mt76_unregister_device() as on PCI.
+	 */
+	if (dev)
+		cancel_work_sync(&dev->nan_deferred_work);
+
+	mt792xu_disconnect(usb_intf);
+}
+#endif
+
 MODULE_DEVICE_TABLE(usb, mt7925u_device_table);
 MODULE_FIRMWARE(MT7925_FIRMWARE_WM);
 MODULE_FIRMWARE(MT7925_ROM_PATCH);
@@ -356,7 +372,12 @@ static struct usb_driver mt7925u_driver = {
 	.name		= KBUILD_MODNAME,
 	.id_table	= mt7925u_device_table,
 	.probe		= mt7925u_probe,
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+	.disconnect	= mt7925u_disconnect,
+#else
 	.disconnect	= mt792xu_disconnect,
+#endif
 #ifdef CONFIG_PM
 	.suspend	= mt7925u_suspend,
 	.resume		= mt7925u_resume,

@@ -11,6 +11,7 @@
 #include "regd.h"
 #include "mcu.h"
 #include "mac.h"
+#include "nan.h"
 
 static void
 mt7925_init_he_caps(struct mt792x_phy *phy, enum nl80211_band band,
@@ -414,7 +415,8 @@ static int mt7925_mac_link_bss_add(struct mt792x_dev *dev,
 			      0 : mconf->mt76.idx % MT76_CONNAC_MAX_WMM_SETS;
 	mconf->mt76.link_idx = hweight16(mvif->valid_links);
 
-	if (mvif->phy->mt76->chandef.chan->band != NL80211_BAND_2GHZ)
+	if (mvif->phy->mt76->chandef.chan &&
+	    mvif->phy->mt76->chandef.chan->band != NL80211_BAND_2GHZ)
 		mconf->mt76.basic_rates_idx = MT792x_BASIC_RATES_TBL + 4;
 	else
 		mconf->mt76.basic_rates_idx = MT792x_BASIC_RATES_TBL;
@@ -480,10 +482,30 @@ mt7925_add_interface(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
 	INIT_WORK(&mvif->csa_work, mt7925_csa_work);
 	timer_setup(&mvif->csa_timer, mt792x_csa_timer, 0);
 
+	if (vif->type == NL80211_IFTYPE_NAN)
+		dev->nan_vif = vif;
 out:
 	mt792x_mutex_release(dev);
 
 	return ret;
+}
+
+static void
+mt7925_remove_interface(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
+{
+	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
+	struct mt792x_dev *dev = mt792x_hw_dev(hw);
+	struct mt792x_bss_conf *mconf;
+
+	mt792x_mutex_acquire(dev);
+
+	if (dev->nan_vif == vif)
+		dev->nan_vif = NULL;
+
+	mconf = mt792x_link_conf_to_mconf(&vif->bss_conf);
+	mt792x_mac_link_bss_remove(dev, mconf, &mvif->sta.deflink);
+
+	mt792x_mutex_release(dev);
 }
 
 static void mt7925_roc_iter(void *priv, u8 *mac,
@@ -1065,6 +1087,24 @@ static int mt7925_mac_link_sta_add(struct mt76_dev *mdev,
 
 	link_conf = mt792x_vif_to_bss_conf(vif, link_id);
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+	/* NAN_DATA (NDI) peers skip association - fill link_sta caps
+	 * from sband and push BSS_INFO with correct phymode + RLM.
+	 */
+	if (vif->type == NL80211_IFTYPE_NAN_DATA) {
+		struct ieee80211_chanctx_conf *nan_ctx;
+
+		nan_ctx = mt7925_nan_seed_link_sta(dev, link_sta);
+		mconf->mt76.ctx = nan_ctx;
+
+		ret = mt7925_mcu_add_bss_info(&dev->phy, nan_ctx,
+					      link_conf, link_sta, true);
+		if (ret)
+			goto out_pm;
+	}
+#endif
+
 	/* should update bss info before STA add */
 	if (vif->type == NL80211_IFTYPE_STATION && !link_sta->sta->tdls) {
 		struct mt792x_link_sta *mlink_bc;
@@ -1342,19 +1382,42 @@ static void mt7925_mac_link_sta_assoc(struct mt76_dev *mdev,
 int mt7925_mac_sta_event(struct mt76_dev *mdev, struct ieee80211_vif *vif,
 			 struct ieee80211_sta *sta, enum mt76_sta_event ev)
 {
+/* compat: only the NAN path below uses dev, and that is 7.2 and up */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+	struct mt792x_dev *dev = container_of(mdev, struct mt792x_dev, mt76);
+#endif
 	struct ieee80211_link_sta *link_sta = &sta->deflink;
 
-	if (ev != MT76_STA_EVENT_ASSOC)
-		return 0;
+	switch (ev) {
+	case MT76_STA_EVENT_ASSOC:
+		if (ieee80211_vif_is_mld(vif)) {
+			struct mt792x_sta *msta =
+				(struct mt792x_sta *)sta->drv_priv;
 
-	if (ieee80211_vif_is_mld(vif)) {
-		struct mt792x_sta *msta = (struct mt792x_sta *)sta->drv_priv;
+			link_sta = mt792x_sta_to_link_sta(vif, sta,
+							  msta->deflink_id);
+			mt7925_mac_set_links(mdev, vif);
+		}
 
-		link_sta = mt792x_sta_to_link_sta(vif, sta, msta->deflink_id);
-		mt7925_mac_set_links(mdev, vif);
+		mt7925_mac_link_sta_assoc(mdev, vif, link_sta);
+		break;
+	case MT76_STA_EVENT_AUTHORIZE:
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+		if (vif->type == NL80211_IFTYPE_NAN_DATA) {
+			int ret;
+
+			mt792x_mutex_acquire(dev);
+			ret = mt792x_nan_map_sta_rec(mdev, vif, sta);
+			mt792x_mutex_release(dev);
+
+			return ret;
+		}
+#endif
+		break;
+	default:
+		break;
 	}
-
-	mt7925_mac_link_sta_assoc(mdev, vif, link_sta);
 
 	return 0;
 }
@@ -1481,6 +1544,39 @@ void mt7925_mac_sta_remove(struct mt76_dev *mdev, struct ieee80211_vif *vif,
 	struct mt792x_dev *dev = container_of(mdev, struct mt792x_dev, mt76);
 	struct mt792x_sta *msta = (struct mt792x_sta *)sta->drv_priv;
 	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
+
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+	/* Release NAN peer record before tearing down the STA. */
+	if (vif->type == NL80211_IFTYPE_NAN ||
+	    vif->type == NL80211_IFTYPE_NAN_DATA) {
+		int ret = mt792x_nan_set_peer_rec(mdev, sta);
+
+		if (ret)
+			dev_err(mdev->dev,
+				"NAN: failed to deactivate peer record: %d\n",
+				ret);
+	}
+
+	/* Release NDP context ID for NAN_DATA sta. */
+	if (vif->type == NL80211_IFTYPE_NAN_DATA) {
+		struct ieee80211_sta *nmi_sta;
+
+		rcu_read_lock();
+		nmi_sta = rcu_dereference(sta->nmi);
+		if (nmi_sta) {
+			struct mt792x_sta *nmi_msta =
+				(struct mt792x_sta *)nmi_sta->drv_priv;
+
+			if (msta->nan_sched.ndp_ctx_assigned) {
+				clear_bit(msta->nan_sched.ndp_ctx_id,
+					  &nmi_msta->nan_sched.ndp_ctx_bitmap);
+				msta->nan_sched.ndp_ctx_assigned = false;
+			}
+		}
+		rcu_read_unlock();
+	}
+#endif
 
 	if (ieee80211_vif_is_mld(vif)) {
 		mt7925_mac_sta_remove_links(dev, vif, sta, msta->valid_links);
@@ -2204,6 +2300,14 @@ static void mt7925_vif_cfg_changed(struct ieee80211_hw *hw,
 	}
 
 	mt792x_mutex_release(dev);
+
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+	if (vif->type == NL80211_IFTYPE_NAN &&
+	    changed & BSS_CHANGED_NAN_LOCAL_SCHED) {
+		mt7925_nan_local_sched_changed(dev, vif);
+	}
+#endif
 }
 
 static void mt7925_link_info_changed(struct ieee80211_hw *hw,
@@ -2650,6 +2754,108 @@ static void mt7925_stop(struct ieee80211_hw *hw, bool suspend)
 	mt792x_stop(hw, suspend);
 }
 
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+static int mt7925_start_nan(struct ieee80211_hw *hw,
+			    struct ieee80211_vif *vif,
+			    struct cfg80211_nan_conf *conf)
+{
+	struct ieee80211_bss_conf *link_conf = &vif->bss_conf;
+	struct mt792x_dev *dev = mt792x_hw_dev(hw);
+	struct ieee80211_channel *chan;
+	int err = 0;
+
+	mt792x_mutex_acquire(dev);
+
+	chan = conf->band_cfgs[NL80211_BAND_2GHZ].chan;
+	if (!chan) {
+		err = -EINVAL;
+		goto out;
+	}
+
+	cfg80211_chandef_create(&link_conf->chanreq.oper, chan,
+				NL80211_CHAN_NO_HT);
+
+	err = mt7925_mcu_add_bss_info(&dev->phy, NULL,
+				      link_conf, NULL, true);
+	if (err < 0)
+		goto out;
+
+	err = mt7925_nan_enable(vif, dev, conf);
+	if (err) {
+		mt7925_mcu_add_bss_info(&dev->phy, NULL, link_conf, NULL, false);
+		goto out;
+	}
+
+	err = mt7925_nan_update_phy_setting(dev);
+
+out:
+	mt792x_mutex_release(dev);
+
+	return err;
+}
+
+static int mt7925_stop_nan(struct ieee80211_hw *hw,
+			   struct ieee80211_vif *vif)
+{
+	struct ieee80211_bss_conf *link_conf = &vif->bss_conf;
+	struct mt792x_dev *dev = mt792x_hw_dev(hw);
+	int err, ret;
+
+	/* Drop a deferred event queued just before stop so a stale cluster_id
+	 * cannot leak into a restart; the work re-checks liveness anyway.
+	 */
+	spin_lock_bh(&dev->nan_deferred_lock);
+	dev->nan_deferred_pending = 0;
+	spin_unlock_bh(&dev->nan_deferred_lock);
+
+	mt792x_mutex_acquire(dev);
+
+	err = mt7925_nan_disable(vif, dev);
+
+	ret = mt7925_mcu_add_bss_info(&dev->phy, NULL, link_conf,
+				      NULL, false);
+	if (!err)
+		err = ret;
+
+	mt792x_mutex_release(dev);
+
+	return err;
+}
+
+static int mt7925_nan_change_conf(struct ieee80211_hw *hw,
+				  struct ieee80211_vif *vif,
+				  struct cfg80211_nan_conf *conf,
+				  u32 changes)
+{
+	struct mt792x_dev *dev = mt792x_hw_dev(hw);
+	int err = 0;
+
+	mt792x_mutex_acquire(dev);
+
+	err = mt7925_nan_change_configure(vif, dev, conf);
+
+	mt792x_mutex_release(dev);
+
+	return err;
+}
+
+static int mt7925_nan_peer_sched_changed(struct ieee80211_hw *hw,
+					 struct ieee80211_sta *sta)
+{
+	struct mt792x_dev *dev = mt792x_hw_dev(hw);
+	int err = 0;
+
+	mt792x_mutex_acquire(dev);
+
+	err = mt792x_nan_set_peer_schedule(dev, sta);
+
+	mt792x_mutex_release(dev);
+
+	return err;
+}
+#endif
+
 static void mt7925_sta_pre_rcu_remove(struct ieee80211_hw *hw,
 				      struct ieee80211_vif *vif,
 				      struct ieee80211_sta *sta)
@@ -2689,7 +2895,7 @@ const struct ieee80211_ops mt7925_ops = {
 	.start = mt7925_start,
 	.stop = mt7925_stop,
 	.add_interface = mt7925_add_interface,
-	.remove_interface = mt792x_remove_interface,
+	.remove_interface = mt7925_remove_interface,
 	.config = mt7925_config,
 	.conf_tx = mt7925_conf_tx,
 	.configure_filter = mt7925_configure_filter,
@@ -2753,6 +2959,13 @@ const struct ieee80211_ops mt7925_ops = {
 	.channel_switch = mt7925_channel_switch,
 	.abort_channel_switch = mt7925_abort_channel_switch,
 	.channel_switch_rx_beacon = mt7925_channel_switch_rx_beacon,
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+	.start_nan = mt7925_start_nan,
+	.stop_nan = mt7925_stop_nan,
+	.nan_change_conf = mt7925_nan_change_conf,
+	.nan_peer_sched_changed = mt7925_nan_peer_sched_changed,
+#endif
 };
 EXPORT_SYMBOL_GPL(mt7925_ops);
 
