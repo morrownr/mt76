@@ -54,7 +54,10 @@ static void mt7925e_unregister_device(struct mt792x_dev *dev)
 	cancel_delayed_work_sync(&pm->ps_work);
 	cancel_delayed_work_sync(&dev->mlo_pm_work);
 	cancel_work_sync(&pm->wake_work);
+/* compat: the cfg80211 NAN API arrived in kernel 7.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 	cancel_work_sync(&dev->nan_deferred_work);
+#endif
 
 	/* Quiesce RX NAPI before tx_token_put()'s idr_destroy(): a still
 	 * in-flight poll can reach PKT_TYPE_TXRX_NOTIFY -> mt76_token_release()
