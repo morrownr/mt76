@@ -38,7 +38,7 @@ d2b01fbc  # pass the LED define via ccflags-y. Top-level Makefile already uses i
 
 # (none)
 
-# Section 3. Patches that have merged here and have been upstreamed.
+# Section 3. Patches that have merged here.
 #
 # A waiting room rather than a resting place. Once one of these lands upstream
 # and flows back through openwrt it arrives as a new commit with its own id,
@@ -84,3 +84,14 @@ d2b01fbc  # pass the LED define via ccflags-y. Top-level Makefile already uses i
 #   2026-08-05, at v4 since 2026-08-27.
 #   https://lore.kernel.org/linux-wireless/20260827083526.1621600-2-eason.lai@mediatek.com/
 #   https://lore.kernel.org/linux-wireless/20260827083526.1621600-3-eason.lai@mediatek.com/
+
+# mt7925: do not disable the NAPI of a missing WM2 queue on reset
+#   Ash's, merged 2026-10-04 as 9d5801f from PR #122. Not on the list yet.
+
+# mt7925: keep the join ROC until the station is authorized
+# mt7921: keep the join ROC until the station is authorized
+#   Ash's pair, found chasing issue 106, merged 2026-10-04 as 1fd3678 and
+#   234e212 from PRs #123 and #121. Not on the list yet.
+
+# mt76_connac: scan 6 GHz wildcard requests passively on connac2
+#   Ash's, merged 2026-10-04 as ce4ee3e from PR #121. Not on the list yet.
