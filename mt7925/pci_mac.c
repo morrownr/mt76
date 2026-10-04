@@ -94,7 +94,12 @@ int mt7925e_mac_reset(struct mt792x_dev *dev)
 		napi_disable(&dev->mt76.napi[MT_RXQ_MAIN]);
 	if (irq_map->rx.wm_complete_mask)
 		napi_disable(&dev->mt76.napi[MT_RXQ_MCU]);
-	if (irq_map->rx.wm2_complete_mask)
+	/* The WM2 queue is only allocated on chips whose DMA layout has one;
+	 * on MT7925 the IRQ map sets the mask but there is no queue and no
+	 * NAPI to disable.
+	 */
+	if (irq_map->rx.wm2_complete_mask &&
+	    dev->mt76.q_rx[MT_RXQ_MCU_WA].ndesc)
 		napi_disable(&dev->mt76.napi[MT_RXQ_MCU_WA]);
 	if (irq_map->tx.all_complete_mask)
 		napi_disable(&dev->mt76.tx_napi);
