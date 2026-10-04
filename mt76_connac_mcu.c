@@ -1859,6 +1859,18 @@ int mt76_connac_mcu_hw_scan(struct mt76_phy *phy, struct ieee80211_vif *vif,
 	req->ssid_type_ext = n_ssids ? BIT(0) : 0;
 	req->ssids_num = n_ssids;
 
+	/* cfg80211 splits the 6 GHz channels into their own request and
+	 * describes the APs to look for in scan_6ghz_params, which this
+	 * command cannot carry. As an active wildcard scan the firmware only
+	 * listens for a short time per channel and often misses the beacon.
+	 * Scan the wildcard-only 6 GHz stage passively; directed scans stay
+	 * active.
+	 */
+	if (is_connac2(phy->dev) && sreq->scan_6ghz && !n_ssids) {
+		req->scan_type = 0;
+		req->probe_req_num = 0;
+	}
+
 	duration = is_connac2(phy->dev) ? 0 : MT76_CONNAC_SCAN_CHANNEL_TIME;
 	/* increase channel time for passive scan */
 	if (!sreq->n_ssids)
