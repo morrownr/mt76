@@ -1472,12 +1472,8 @@ static void mt7921_mgd_complete_tx(struct ieee80211_hw *hw,
 {
 	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
 
-	/* The AP starts the 4-way handshake as soon as the association
-	 * succeeds. Releasing the join ROC at this point makes the firmware
-	 * unresponsive for several ms right when message 3 arrives, so it
-	 * can be lost and the handshake times out. Keep the ROC until the
-	 * station is authorized; mt7921_mac_sta_event() releases it. If that
-	 * never happens, the ROC timer or the station removal does.
+	/* Keep the join ROC until the station is authorized, so that it
+	 * covers the 4-way handshake. mt7921_mac_sta_event() releases it.
 	 */
 	if (vif->type == NL80211_IFTYPE_STATION && info->success &&
 	    (info->subtype == IEEE80211_STYPE_ASSOC_REQ ||
