@@ -2251,16 +2251,10 @@ static void mt7925_mgd_complete_tx(struct ieee80211_hw *hw,
 {
 	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
 
-	/* The AP starts the 4-way handshake as soon as the association
-	 * succeeds. Releasing the join ROC at this point makes the firmware
-	 * unresponsive for several ms right when message 3 arrives, so it
-	 * can be lost and the handshake times out. Keep the ROC until the
-	 * station is authorized; mt7925_mac_sta_event() releases it. If that
-	 * never happens, the ROC timer or the station removal does.
-	 *
-	 * Not for MLO: there the ROC active here is the MLO ROC set up by
-	 * mt7925_mac_set_links(), which has to be released before the link
-	 * activation work sets its own.
+	/* Keep the join ROC until the station is authorized, so that it
+	 * covers the 4-way handshake. mt7925_mac_sta_event() releases it.
+	 * On MLD, the active ROC is the MLO ROC, which must be released
+	 * before the link activation work sets its own.
 	 */
 	if (vif->type == NL80211_IFTYPE_STATION && !ieee80211_vif_is_mld(vif) &&
 	    info->success &&
