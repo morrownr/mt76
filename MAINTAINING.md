@@ -123,11 +123,13 @@ Three habits keep these from getting away from us:
 
 No patch files, no configure step. The compiler picks the right side of the guard from the kernel headers it's building against.
 
+Any kernel older than 7.0 is best effort. Nobody has to run a change on an older kernel before it lands, but it still has to build on 6.12. The Build check on GitHub compiles every pull request and every push to main against Debian 13's 6.12 headers, and any compiler warning fails it. If the floor ever moves, the kernel range in dkms.conf and the Debian release the check uses have to move with it.
+
 ## Test before it lands
 
 The least you should do before pushing anything:
 
-- Build on the floor, kernel 6.12. A Pi on current Debian is an easy one to keep around for this.
+- Build on the floor, kernel 6.12. The Build check does this for you on a pull request. A push straight to main is only checked after it lands.
 - Build on something recent, 6.17 or newer.
 
     make clean && make -j$(nproc)

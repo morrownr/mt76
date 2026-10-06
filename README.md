@@ -2,6 +2,7 @@
 
 Build, install, and manage MediaTek mt76 WiFi drivers as out-of-tree kernel
 modules. Supports DKMS, non-DKMS, Secure Boot, and kernels 6.12 through 7.2.
+Kernels older than 7.0 are best effort.
 
 Based on [openwrt/mt76](https://github.com/openwrt/mt76), adapted for
 standalone out-of-tree building by the
@@ -186,7 +187,7 @@ command.
 ## Kernel Compatibility
 
 Supported range: **6.12 through 7.x** (enforced by `BUILD_EXCLUSIVE_KERNEL`
-in `dkms.conf`).
+in `dkms.conf`). Kernels older than 7.0 are best effort.
 
 Compatibility patches in `compat-patches/`:
 - `linux/unaligned.h` vs `asm/unaligned.h` header rename (kernel 6.12)
