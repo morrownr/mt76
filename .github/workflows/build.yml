@@ -1,0 +1,36 @@
+# Builds the tree against kernel 6.12, the oldest kernel it has to build on,
+# for every pull request and every push to main. It only compiles, so a pass
+# says nothing about whether the driver works there. See MAINTAINING.md.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Also lets it be run by hand from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kernel-6-12:
+    name: Kernel 6.12, Debian 13
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Install the kernel headers Debian 13 ships
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential linux-headers-amd64
+
+      - uses: actions/checkout@v7
+
+      # uname -r in the container gives the runner's own kernel, so name the
+      # headers' version. The Makefile's -Werror only reaches the top directory.
+      # KCFLAGS covers the chip directories too, so any warning fails the build.
+      - name: Build
+        run: make KVER="$(ls /lib/modules)" KCFLAGS=-Werror
