@@ -14,6 +14,7 @@
 #   make KVER=6.12.0-generic   Build for a specific kernel version
 #   make clean                 Clean build artifacts
 #   sudo make install          Install modules and run depmod
+#   sudo make sign-install     Sign the modules for Secure Boot, then install
 #   sudo make install_fw       Install firmware files
 #   sudo make uninstall        Remove installed modules
 
@@ -118,7 +119,18 @@ MODDIR ?= /lib/modules/$(KVER)/extra/mt76
 FWDIR := /lib/firmware/mediatek
 NPROC ?= $(shell nproc --ignore=1)
 
-.PHONY: modules clean install install_fw uninstall cleanup_target_system
+# Secure Boot. The kernel then loads only modules signed by a key it trusts,
+# and the distro's own key is not available, so sign-install signs with a
+# Machine Owner Key: created here on first use, enrolled through the MOK
+# manager on the next boot, reused after that. Ubuntu already keeps one for
+# dkms, and that key is used when present so nothing new has to be enrolled.
+MOK_DIR   ?= $(if $(and $(wildcard /var/lib/shim-signed/mok/MOK.priv),$(wildcard /var/lib/shim-signed/mok/MOK.der)),/var/lib/shim-signed/mok,.)
+MOK_KEY   ?= $(MOK_DIR)/MOK.priv
+MOK_CERT  ?= $(MOK_DIR)/MOK.der
+SIGN_FILE ?= $(KDIR)/scripts/sign-file
+SIGN_HASH ?= sha256
+
+.PHONY: modules clean install sign-install install_fw uninstall cleanup_target_system
 
 modules:
 	$(MAKE) -j$(NPROC) -C $(KDIR) M=$$PWD modules
@@ -155,6 +167,13 @@ install:
 	@find . -name "*_git.ko" -exec strip -g {} \;
 	@install -dvm 755 $(MODDIR)
 	@find . -name "*_git.ko" -exec install -vm 644 {} $(MODDIR) \;
+	@# Sign after the strip and before the compression, or the signature is lost
+	@if [ -n "$(MODSIGN)" ]; then \
+		echo "Signing modules with $(MOK_KEY)..."; \
+		for m in $(MODDIR)/*.ko; do \
+			$(SIGN_FILE) $(SIGN_HASH) $(MOK_KEY) $(MOK_CERT) $$m || exit 1; \
+		done; \
+	fi
 	@# Match the distro's module compression scheme
 	@if ls /lib/modules/$(KVER)/kernel/net/wireless/*.ko.zst >/dev/null 2>&1; then \
 		echo "Compressing modules with zstd (matching distro scheme)..."; \
@@ -167,6 +186,43 @@ install:
 		gzip -f $(MODDIR)/*.ko 2>/dev/null || true; \
 	fi
 	depmod -a $(KVER)
+
+sign-install:
+	@test -x $(SIGN_FILE) || { echo "$(SIGN_FILE) not found; install the kernel headers for $(KVER)"; exit 1; }
+	@command -v openssl >/dev/null 2>&1 || { echo "openssl is needed to create the signing key"; exit 1; }
+	@# Never overwrite half of an existing pair: that would break whatever else it signs
+	@if [ -f $(MOK_KEY) ] && [ -f $(MOK_CERT) ]; then :; \
+	elif [ -f $(MOK_KEY) ] || [ -f $(MOK_CERT) ]; then \
+		echo "Found only one of $(MOK_KEY) and $(MOK_CERT). Move it aside, or pass MOK_KEY= and MOK_CERT= as a pair."; exit 1; \
+	else \
+		echo "Creating a Machine Owner Key: $(MOK_KEY) and $(MOK_CERT)..."; \
+		openssl req -new -x509 -newkey rsa:2048 -nodes -days 36500 \
+			-subj "/CN=mt76_git module signing key/" \
+			-keyout $(MOK_KEY) -outform DER -out $(MOK_CERT) 2>/dev/null || exit 1; \
+		chmod 600 $(MOK_KEY); \
+	fi
+	@$(MAKE) --no-print-directory MODSIGN=1 install
+	@# mokutil --test-key exits 0 when the key is new, and otherwise says why not
+	@if ! command -v mokutil >/dev/null 2>&1; then \
+		echo "mokutil is not installed. The modules load once the key is enrolled:"; \
+		echo "  sudo mokutil --import $(MOK_CERT)"; \
+	else \
+		msg=$$(mokutil --test-key $(MOK_CERT) 2>&1); rc=$$?; \
+		if [ $$rc -eq 0 ] && [ ! -t 0 ]; then \
+			echo "No terminal to take a password on, so the key is not queued. Run this, then reboot:"; \
+			echo "  sudo mokutil --import $(MOK_CERT)"; \
+		elif [ $$rc -eq 0 ]; then \
+			echo "Enrolling the signing key. Choose a one-time password; the MOK manager asks for it on the next boot."; \
+			mokutil --import $(MOK_CERT) || { \
+				echo "mokutil could not queue the key. Run this, then reboot:"; \
+				echo "  sudo mokutil --import $(MOK_CERT)"; }; \
+			echo "On that boot pick Enroll MOK, Continue, Yes, and type the password. The driver loads after that."; \
+		else case "$$msg" in \
+			*"already enrolled"*|*"already in db"*) echo "Signing key already enrolled." ;; \
+			*"already in the enrollment request"*) echo "Signing key already queued: the MOK manager asks for your password on the next boot." ;; \
+			*) echo "$$msg"; echo "Enroll the key yourself, then reboot:"; echo "  sudo mokutil --import $(MOK_CERT)" ;; \
+		esac; fi; \
+	fi
 
 install_fw:
 	@echo "Installing firmware to $(FWDIR)..."

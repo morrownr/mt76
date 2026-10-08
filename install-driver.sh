@@ -94,6 +94,7 @@ fi
 # NoFirmware skips copying the bundled firmware blobs into /lib/firmware/mediatek
 NO_PROMPT=0
 SKIP_FIRMWARE=0
+SIGNED=0
 while [ $# -gt 0 ]
 do
 	case $1 in
@@ -293,6 +294,13 @@ fi
 if ! command -v make >/dev/null 2>&1; then
 	MISSING="${MISSING} make"
 fi
+# Without dkms, Secure Boot means the modules get signed here, which needs
+# a key, and openssl creates it.
+if ! command -v dkms >/dev/null 2>&1 && command -v mokutil >/dev/null 2>&1 \
+	&& mokutil --sb-state 2>/dev/null | grep -qi enabled \
+	&& ! command -v openssl >/dev/null 2>&1; then
+	MISSING="${MISSING} openssl"
+fi
 
 # A kernel built with clang (CachyOS, Chimera) makes
 # kbuild pass clang-only flags to whatever compiler builds a module, so gcc
@@ -480,9 +488,10 @@ if ! command -v dkms >/dev/null 2>&1; then
 	# non-dkms: check for secure boot
 	if command -v mokutil >/dev/null 2>&1; then
 		if mokutil --sb-state 2>/dev/null | grep -qi enabled; then
-			printf '  %sSecure Boot enabled -- using sign-install%s\n' "${YELLOW}" "${NC}"
+			printf '  %sSecure Boot enabled -- signing the modules%s\n' "${YELLOW}" "${NC}"
 			make sign-install
 			RESULT=$?
+			SIGNED=1
 		else
 			make install
 			RESULT=$?
@@ -607,6 +616,13 @@ printf '  %sTip: Update before distro or kernel upgrades.%s\n' "${DIM}" "${NC}"
 printf '  %sTip: Updates can be run as often as you like (recommended: monthly).%s\n' "${DIM}" "${NC}"
 printf '  %s================================================================%s\n' "${BOLD}" "${NC}"
 printf "\n"
+
+if [ $SIGNED -eq 1 ]; then
+	printf '  %sSecure Boot:%s the modules are signed with a Machine Owner Key. If a\n' "${BOLD}" "${NC}"
+	printf '  password was asked for above, the MOK manager appears on the next boot:\n'
+	printf '  pick Enroll MOK, Continue, Yes, and enter that password. The driver\n'
+	printf '  loads after that.\n\n'
+fi
 
 # if NoPrompt is not used, ask user about rebooting
 if [ $NO_PROMPT -ne 1 ]; then

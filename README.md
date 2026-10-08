@@ -162,6 +162,7 @@ The installer checks for all of these automatically:
 - `iw` -- wireless configuration tool
 - Kernel header files for your running kernel
 - Optional: `dkms` for automatic rebuilds on kernel updates
+- With Secure Boot on and no dkms: `openssl` and `mokutil`, to sign the modules
 
 **Kernels built with clang** (CachyOS, Chimera) need
 their modules built with clang too. The Makefile detects this from the kernel's
@@ -170,6 +171,16 @@ dkms alike. Install `clang`, `lld` and `llvm` first; the package names are the
 same on Arch, Debian and Fedora. The tell that you are on such a kernel and the
 tools are missing is gcc failing with `unrecognized command-line option
 '-mstack-alignment=8'`.
+
+## Secure Boot
+
+A kernel with Secure Boot on loads only signed modules. Without dkms, the
+installer runs `make sign-install`: the first time, it creates a Machine Owner
+Key in this directory, signs every module with it, and asks for a one-time
+password. On the next boot the MOK manager offers to enroll the key: pick
+Enroll MOK, Continue, Yes, and type that password. The driver loads from then
+on, and later updates reuse the key with no further prompts. Ubuntu's existing
+key under `/var/lib/shim-signed/mok` is used when present.
 
 ## Reporting Issues
 
