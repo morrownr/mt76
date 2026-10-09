@@ -44,3 +44,7 @@ tmp_fw/
 picks-clean.txt
 picks-blocked.txt
 picks-broken.txt
+
+# Secure Boot signing key created by make sign-install
+MOK.priv
+MOK.der

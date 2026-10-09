@@ -336,6 +336,12 @@ if command -v mokutil >/dev/null 2>&1; then
 	case "${SB_STATE}" in
 		*enabled*)
 			warn "Secure Boot is ENABLED -- modules must be signed to load"
+			SIGNER=$(modinfo -F signer mt76_git 2>/dev/null)
+			if [ -n "${SIGNER}" ]; then
+				ok "mt76_git is signed by: ${SIGNER}"
+			elif modinfo mt76_git >/dev/null 2>&1; then
+				warn "mt76_git is installed but not signed"
+			fi
 			;;
 		*disabled*)
 			ok "Secure Boot is disabled"
