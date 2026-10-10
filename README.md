@@ -11,7 +11,10 @@ standalone out-of-tree building by the
 For companies, organizations or individuals seeking an engineer to do professional contract work:
 
 ```
-Contract work: Linux wireless drivers. Lab testing, patches, and ongoing support.
+Devin Wittmayer
+For adapter makers and companies shipping Linux devices with WiFi.
+Driver fixes and new adapter support, taken into the mainline kernel.
+MediaTek mt76 and Realtek rtw89, tested in my own lab.
 lucid_duck@justthetip.ca
 https://github.com/Lucid-Duck
 ```
