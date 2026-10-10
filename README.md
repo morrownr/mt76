@@ -8,6 +8,9 @@ Based on [openwrt/mt76](https://github.com/openwrt/mt76), adapted for
 standalone out-of-tree building by the
 [morrownr](https://github.com/morrownr) community.
 
+Asked to try a fix? [TESTING.md](TESTING.md) is the one page you need:
+install, test, report, go back.
+
 For companies, organizations or individuals seeking an engineer to do professional contract work:
 
 ```
