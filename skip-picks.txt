@@ -29,6 +29,12 @@ a6e5a072  # mt7921 FIF_FCSFAIL, ours. Carried here as 3dcd2f14
 d367ee6d  # mt7921 drop TXRX_NOTIFY on non-mmio, ours. Carried here as 002723b6
 d2b01fbc  # pass the LED define via ccflags-y. Top-level Makefile already uses it
 
+# Left out of the batch that caught up to openwrt 467ae2e3 on 2026-10-14.
+dd93a16e  # mt7921 regd self-manager. Held: it puts 22 dBm in every rule, see PR #120
+f3e79285  # USB TX leak, Eason's. Carried here as 69d63372, the same patch
+f8b59ca3  # fixes the PS buffering reverted here on 06-04. That code now needs mac80211 7.3
+06b69763  # mt7996 PS sync parsing, part of that same revert
+
 # Section 2. Experimental/testing patches that have been merged here but have
 # not been sent upstream yet.
 #
@@ -45,53 +51,10 @@ d2b01fbc  # pass the LED define via ccflags-y. Top-level Makefile already uses i
 # and show-picks offers it as something we are missing. At that point it wants
 # a line in section 1, with the reason being that we already carry it.
 
-# mt7921: fix lock inversion between dev->mutex and iflist_mtx
-#   Merged 2026-08-28. Accepted upstream, waiting in Felix's mt76-fixes.
-#   On the list since 2026-08-10.
-#   https://lore.kernel.org/linux-wireless/20260810045338.118923-2-lucid_duck@justthetip.ca/
-
-# mt7925: fix lock inversion between dev->mutex and iflist_mtx
-#   Merged 2026-08-28. Accepted upstream, waiting in Felix's mt76-fixes.
-#   On the list since 2026-08-10.
-#   https://lore.kernel.org/linux-wireless/20260810045338.118923-3-lucid_duck@justthetip.ca/
-
-# mt7925: check drv_pmctrl return in the PCIe reset path
-#   Merged 2026-08-28. Accepted upstream, waiting in Felix's mt76-fixes.
-#   On the list since 2026-08-09.
-#   https://lore.kernel.org/linux-wireless/20260809205559.32116-1-lucid_duck@justthetip.ca/
-
-# mt7921: check drv_pmctrl return in the PCIe reset path
-#   Merged 2026-08-26. Reported and tested by moosager on their own
-#   hardware. On the list since 2026-08-09.
-#   https://lore.kernel.org/linux-wireless/20260809012309.43657-1-lucid_duck@justthetip.ca/
-
-# mt7925: honour mac80211's FIF_FCSFAIL instead of hardcoding drop_err
-#   Merged 2026-08-26. On the list since 2026-08-26.
-#   https://lore.kernel.org/linux-wireless/20260826091757.469953-1-markanthonyagarro@gmail.com/
-
-# mt76x02: validate TX-status rate index before mac80211 handoff
-#   Merged 2026-08-26. On the list since 2026-08-26.
-#   https://lore.kernel.org/linux-wireless/20260826092755.480190-1-markanthonyagarro@gmail.com/
-
-# mt7921: honour FIF_FCSFAIL instead of hardcoding drop_err
-#   Merged 2026-09-06. Accepted upstream, waiting in Felix's mt76-fixes.
-#   On the list since 2026-08-26.
-#   https://lore.kernel.org/linux-wireless/20260826231029.39632-1-lucid_duck@justthetip.ca/
-
-# mt792x: fix UAF in SDIO TX path when out of memory
-# mt76: fix memory leak in USB TX path
-#   Eason Lai's pair, carried 2026-09-08 for issue 83. On the list since
-#   2026-08-05, at v4 since 2026-08-27.
-#   https://lore.kernel.org/linux-wireless/20260827083526.1621600-2-eason.lai@mediatek.com/
-#   https://lore.kernel.org/linux-wireless/20260827083526.1621600-3-eason.lai@mediatek.com/
-
 # mt7925: do not disable the NAPI of a missing WM2 queue on reset
 #   Ash's, merged 2026-10-04 as 9d5801f from PR #122. Not on the list yet.
-
-# mt7925: keep the join ROC until the station is authorized
-# mt7921: keep the join ROC until the station is authorized
-#   Ash's pair, found chasing issue 106, merged 2026-10-04 as 1fd3678 and
-#   234e212 from PRs #123 and #121. Not on the list yet.
+#   Upstream fixed the same crash another way in 0f7f2f6f, picked here
+#   2026-10-14. This check stays.
 
 # mt76_connac: scan 6 GHz wildcard requests passively on connac2
 #   Ash's, merged 2026-10-04 as ce4ee3e from PR #121. Not on the list yet.
