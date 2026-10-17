@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause-Clear
 
+ccflags-y += -DCONFIG_MT76_LEDS
+
 ifneq ($(CONFIG_PCI),)
 obj-m += mt7996e_git.o
 endif

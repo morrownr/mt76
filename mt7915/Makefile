@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BSD-3-Clause-Clear
 
-EXTRA_CFLAGS += -DCONFIG_MT76_LEDS
+ccflags-y += -DCONFIG_MT76_LEDS
 
 ifneq ($(CONFIG_PCI),)
 obj-m += mt7915e_git.o

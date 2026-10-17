@@ -689,7 +689,7 @@ mt7925_mac_write_txwi_80211(struct mt76_dev *dev, __le32 *txwi,
 /* compat: see note in mt76_connac_mac.c -- 7.1 mac80211 action API change */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
 	if (ieee80211_is_action(fc) &&
-	    skb->len >= IEEE80211_MIN_ACTION_SIZE(addba_req) &&
+	    skb->len >= IEEE80211_MIN_ACTION_SIZE(action_code) &&
 	    mgmt->u.action.category == WLAN_CATEGORY_BACK &&
 	    mgmt->u.action.action_code == WLAN_ACTION_ADDBA_REQ)
 #else
@@ -806,7 +806,8 @@ mt7925_mac_write_txwi(struct mt76_dev *dev, __le32 *txwi,
 	val = FIELD_PREP(MT_TXD1_WLAN_IDX, wcid->idx) |
 	      FIELD_PREP(MT_TXD1_OWN_MAC, omac_idx);
 
-	if (band_idx)
+	/* 0xff means BAND_AUTO to the firmware, and TGID cannot encode it */
+	if (band_idx && band_idx != 0xff)
 		val |= FIELD_PREP(MT_TXD1_TGID, band_idx);
 
 	txwi[1] = cpu_to_le32(val);
@@ -1510,7 +1511,7 @@ mt7925_vif_connect_iter(void *priv, u8 *mac,
 					    true, NULL);
 		mt7925_mcu_sta_update(dev, NULL, vif,
 				      &mvif->sta.deflink, true,
-				      MT76_STA_INFO_STATE_NONE);
+				      MT76_STA_INFO_STATE_NONE, NULL);
 		mt7925_mcu_uni_add_beacon_offload(dev, hw, vif, true);
 	}
 }
@@ -1670,9 +1671,9 @@ int mt7925_usb_sdio_tx_prepare_skb(struct mt76_dev *mdev, void *txwi_ptr,
 	if (!wcid)
 		wcid = &dev->mt76.global_wcid;
 
-	if (skb_headroom(skb) < MT_SDIO_TXD_SIZE + MT_SDIO_HDR_SIZE &&
-	    skb_cow_head(skb, MT_SDIO_TXD_SIZE + MT_SDIO_HDR_SIZE))
-		return -ENOMEM;
+	err = skb_cow_head(skb, MT_SDIO_TXD_SIZE + MT_SDIO_HDR_SIZE);
+	if (err)
+		return err;
 
 	if (sta) {
 		struct mt792x_sta *msta = (struct mt792x_sta *)sta->drv_priv;
@@ -1710,11 +1711,14 @@ void mt7925_usb_sdio_tx_complete_skb(struct mt76_dev *mdev,
 	u16 idx;
 
 	idx = le32_get_bits(txwi[1], MT_TXD1_WLAN_IDX);
+
+	rcu_read_lock();
 	wcid = __mt76_wcid_ptr(mdev, idx);
 	sta = wcid_to_sta(wcid);
 
 	if (sta && likely(e->skb->protocol != cpu_to_be16(ETH_P_PAE)))
 		mt7925_tx_check_aggr(sta, e->skb, wcid);
+	rcu_read_unlock();
 
 	skb_pull(e->skb, headroom);
 	mt76_tx_complete_skb(mdev, e->wcid, e->skb);

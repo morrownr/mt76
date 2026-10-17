@@ -132,7 +132,7 @@ int mt7925e_mac_reset(struct mt792x_dev *dev)
 
 	err = mt792xe_mcu_fw_pmctrl(dev);
 	if (err)
-		return err;
+		goto out;
 
 	err = __mt792xe_mcu_drv_pmctrl(dev);
 	if (err)
@@ -141,6 +141,8 @@ int mt7925e_mac_reset(struct mt792x_dev *dev)
 	err = mt7925_run_firmware(dev);
 	if (err)
 		goto out;
+
+	mt7925e_axidma_cal_cache_init(dev);
 
 	err = mt7925_mcu_set_eeprom(dev);
 	if (err)

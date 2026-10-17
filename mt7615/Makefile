@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BSD-3-Clause-Clear
 
-EXTRA_CFLAGS += -DCONFIG_MT76_LEDS
+ccflags-y += -DCONFIG_MT76_LEDS
 
 obj-m += mt7615_common_git.o
 

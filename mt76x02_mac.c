@@ -302,20 +302,12 @@ mt76x02_mac_process_tx_rate(struct ieee80211_tx_rate *txrate, u16 rate,
 		txrate->flags |= IEEE80211_TX_RC_GREEN_FIELD;
 		fallthrough;
 	case MT_PHY_TYPE_HT:
-		/* Raw hardware TX-status index is unvalidated; a stale or
-		 * corrupt value here overflows mac80211/minstrel_ht's
-		 * per-group rate array (MCS_GROUP_RATES == 10) and crashes.
-		 * Valid 802.11n MCS indices are 0-31 (four streams x 8).
-		 */
 		if (idx > 31)
 			return -EINVAL;
 		txrate->flags |= IEEE80211_TX_RC_MCS;
 		txrate->idx = idx;
 		break;
 	case MT_PHY_TYPE_VHT:
-		/* Same overflow risk for VHT: mac80211 expects the MCS
-		 * nibble (bits 3:0) in range 0-9, nss packed above it.
-		 */
 		if ((idx & 0xf) > 9)
 			return -EINVAL;
 		txrate->flags |= IEEE80211_TX_RC_VHT_MCS;
@@ -824,9 +816,13 @@ int mt76x02_mac_process_rx(struct mt76x02_dev *dev, struct sk_buff *skb,
 	len = FIELD_GET(MT_RXWI_CTL_MPDU_LEN, ctl);
 	pn_len = FIELD_GET(MT_RXINFO_PN_LEN, rxinfo);
 	if (pn_len) {
-		int offset = ieee80211_get_hdrlen_from_skb(skb) + pad_len;
-		u8 *data = skb->data + offset;
+		unsigned int offset = ieee80211_get_hdrlen_from_skb(skb) + pad_len;
+		u8 *data;
 
+		if (offset + 8 > skb->len)
+			return -EINVAL;
+
+		data = skb->data + offset;
 		status->iv[0] = data[7];
 		status->iv[1] = data[6];
 		status->iv[2] = data[5];
@@ -845,6 +841,9 @@ int mt76x02_mac_process_rx(struct mt76x02_dev *dev, struct sk_buff *skb,
 			len -= pn_len << 2;
 		}
 	}
+
+	if (pad_len + ieee80211_get_hdrlen_from_skb(skb) > skb->len)
+		return -EINVAL;
 
 	mt76x02_remove_hdr_pad(skb, pad_len);
 

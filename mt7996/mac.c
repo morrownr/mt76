@@ -776,7 +776,7 @@ mt7996_mac_write_txwi_80211(struct mt7996_dev *dev, __le32 *txwi,
 /* compat: see note in mt76_connac_mac.c -- 7.1 mac80211 action API change */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
 	if (ieee80211_is_action(fc) &&
-	    skb->len >= IEEE80211_MIN_ACTION_SIZE(addba_req) &&
+	    skb->len >= IEEE80211_MIN_ACTION_SIZE(action_code) &&
 	    mgmt->u.action.category == WLAN_CATEGORY_BACK &&
 	    mgmt->u.action.action_code == WLAN_ACTION_ADDBA_REQ) {
 #else
@@ -923,7 +923,7 @@ void mt7996_mac_write_txwi(struct mt7996_dev *dev, __le32 *txwi,
 	mvif = vif ? (struct mt7996_vif *)vif->drv_priv : NULL;
 	if (mvif) {
 		if (wcid->offchannel)
-			mlink = rcu_dereference(mvif->mt76.offchannel_link);
+			mlink = mt7996_offchannel_link(wcid);
 		if (!mlink && link_id != IEEE80211_LINK_UNSPECIFIED)
 			mlink = rcu_dereference(mvif->mt76.link[link_id]);
 	}
@@ -1105,7 +1105,7 @@ int mt7996_tx_prepare_skb(struct mt76_dev *mdev, void *txwi_ptr,
 	 * compatible with 802.11 EAPOL frame, we do the translation by
 	 * software
 	 */
-	if (tx_info->skb->protocol == cpu_to_be16(ETH_P_PAE) && sta->mlo) {
+	if (sta && tx_info->skb->protocol == cpu_to_be16(ETH_P_PAE) && sta->mlo) {
 		struct ieee80211_hdr *hdr = (void *)tx_info->skb->data;
 		struct ieee80211_bss_conf *link_conf;
 		struct ieee80211_link_sta *link_sta;
@@ -1204,7 +1204,7 @@ int mt7996_tx_prepare_skb(struct mt76_dev *mdev, void *txwi_ptr,
 
 		if (mvif) {
 			if (wcid->offchannel)
-				mlink = rcu_dereference(mvif->mt76.offchannel_link);
+				mlink = mt7996_offchannel_link(wcid);
 			if (!mlink)
 				mlink = rcu_dereference(mvif->mt76.link[wcid->link_id]);
 
@@ -1516,7 +1516,8 @@ mt7996_mac_add_txs_skb(struct mt7996_dev *dev, struct mt76_wcid *wcid,
 		}
 	}
 
-	if (mtk_wed_device_active(&dev->mt76.mmio.wed) && wcid->sta) {
+	if ((mtk_wed_device_active(&dev->mt76.mmio.wed) ||
+	     mt76_npu_device_active(&dev->mt76)) && wcid->sta) {
 		struct ieee80211_sta *sta;
 		u8 tid;
 
@@ -1948,6 +1949,9 @@ void mt7996_rro_rx_process(struct mt76_dev *mdev, void *data)
 	struct mt7996_msdu_page_info *pinfo = NULL;
 	struct mt7996_msdu_page *p = NULL;
 	int i, seq_num = 0;
+
+	if (seq_id > MT7996_RRO_MAX_SESSION)
+		return;
 
 	for (i = 0; i < ind_count; i++) {
 		struct mt7996_wed_rro_addr *e;
@@ -2476,6 +2480,7 @@ mt7996_mac_full_reset(struct mt7996_dev *dev)
 
 	dev->recovery.hw_full_reset = true;
 
+	set_bit(MT76_RESTART, &dev->mphy.state);
 	set_bit(MT76_MCU_RESET, &dev->mphy.state);
 	wake_up(&dev->mt76.mcu.wait);
 	ieee80211_stop_queues(hw);
@@ -2957,6 +2962,10 @@ void mt7996_mac_sta_rc_work(struct work_struct *work)
 
 		changed = msta_link->changed;
 		msta_link->changed = 0;
+
+		if (!msta_link->connected)
+			continue;
+
 		mvif = msta_link->sta->vif;
 		vif = container_of((void *)mvif, struct ieee80211_vif,
 				   drv_priv);
@@ -3231,6 +3240,12 @@ void mt7996_mac_add_twt_setup(struct ieee80211_hw *hw,
 	struct mt7996_twt_flow *flow;
 	u8 flowid, table_id, exp;
 
+	/* the firmware does not support iTWT agreements with MLD peers, and
+	 * driver TWT state is only tracked on the default link
+	 */
+	if (sta->mlo)
+		goto out;
+
 	if (mt7996_mac_check_twt_req(twt))
 		goto out;
 
@@ -3292,8 +3307,10 @@ void mt7996_mac_add_twt_setup(struct ieee80211_hw *hw,
 	flow->tsf = le64_to_cpu(twt_agrt->twt);
 
 	if (mt7996_mcu_twt_agrt_update(dev, &msta->vif->deflink, flow,
-				       MCU_TWT_AGRT_ADD))
+				       MCU_TWT_AGRT_ADD)) {
+		list_del(&flow->list);
 		goto unlock;
+	}
 
 	setup_cmd = TWT_SETUP_CMD_ACCEPT;
 	dev->twt.table_mask |= BIT(table_id);

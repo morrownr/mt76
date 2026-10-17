@@ -19,6 +19,21 @@ bool mt7921_regd_clc_supported(struct mt792x_dev *dev)
 	return true;
 }
 
+static bool
+mt7921_regd_dt_has_channel(struct device_node *band_np,
+			   struct ieee80211_channel *ch)
+{
+	struct device_node *chan_np;
+
+	if (!band_np)
+		return false;
+
+	chan_np = mt76_find_channel_node(band_np, ch);
+	of_node_put(chan_np);
+
+	return !!chan_np;
+}
+
 static void
 mt7921_regd_channel_update(struct wiphy *wiphy, struct mt792x_dev *dev)
 {
@@ -33,12 +48,15 @@ mt7921_regd_channel_update(struct wiphy *wiphy, struct mt792x_dev *dev)
 	np = mt76_find_power_limits_node(mdev);
 
 	sband = wiphy->bands[NL80211_BAND_5GHZ];
+	if (!sband)
+		goto out;
+
 	band_np = np ? of_get_child_by_name(np, "txpower-5g") : NULL;
 	for (i = 0; i < sband->n_channels; i++) {
 		ch = &sband->channels[i];
 		cfreq = ch->center_freq;
 
-		if (np && (!band_np || !mt76_find_channel_node(band_np, ch))) {
+		if (np && !mt7921_regd_dt_has_channel(band_np, ch)) {
 			ch->flags |= IEEE80211_CHAN_DISABLED;
 			continue;
 		}
@@ -47,17 +65,18 @@ mt7921_regd_channel_update(struct wiphy *wiphy, struct mt792x_dev *dev)
 		if (IS_UNII_INVALID(0, 5845, 5925))
 			ch->flags |= IEEE80211_CHAN_DISABLED;
 	}
+	of_node_put(band_np);
 
 	sband = wiphy->bands[NL80211_BAND_6GHZ];
 	if (!sband)
-		return;
+		goto out;
 
 	band_np = np ? of_get_child_by_name(np, "txpower-6g") : NULL;
 	for (i = 0; i < sband->n_channels; i++) {
 		ch = &sband->channels[i];
 		cfreq = ch->center_freq;
 
-		if (np && (!band_np || !mt76_find_channel_node(band_np, ch))) {
+		if (np && !mt7921_regd_dt_has_channel(band_np, ch)) {
 			ch->flags |= IEEE80211_CHAN_DISABLED;
 			continue;
 		}
@@ -69,6 +88,10 @@ mt7921_regd_channel_update(struct wiphy *wiphy, struct mt792x_dev *dev)
 		    IS_UNII_INVALID(4, 6875, 7125))
 			ch->flags |= IEEE80211_CHAN_DISABLED;
 	}
+	of_node_put(band_np);
+
+out:
+	of_node_put(np);
 }
 
 int __mt7921_mcu_regd_update(struct mt792x_dev *dev, u8 *alpha2,
