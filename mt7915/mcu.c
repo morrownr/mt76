@@ -2245,6 +2245,10 @@ int mt7915_mcu_muru_debug_get(struct mt7915_phy *phy)
 					&req, sizeof(req), true, &skb);
 	if (ret)
 		return ret;
+	if (skb->len < sizeof(*mu_stats)) {
+		dev_kfree_skb(skb);
+		return -EINVAL;
+	}
 
 	mu_stats = (struct mt7915_mcu_muru_stats *)(skb->data);
 
