@@ -16,6 +16,7 @@
 #   sudo make install          Install modules and run depmod
 #   sudo make sign-install     Sign the modules for Secure Boot, then install
 #   sudo make install_fw       Install firmware files
+#   make check_deps            Check what MT7927 multi-link operation needs besides the driver
 #   sudo make uninstall        Remove installed modules
 
 ifneq ($(KERNELRELEASE),)
@@ -130,7 +131,7 @@ MOK_CERT  ?= $(MOK_DIR)/MOK.der
 SIGN_FILE ?= $(KDIR)/scripts/sign-file
 SIGN_HASH ?= sha256
 
-.PHONY: modules clean install sign-install install_fw uninstall cleanup_target_system
+.PHONY: modules clean install sign-install install_fw uninstall cleanup_target_system check_deps
 
 modules:
 	$(MAKE) -j$(NPROC) -C $(KDIR) M=$$PWD modules
@@ -186,6 +187,7 @@ install:
 		gzip -f $(MODDIR)/*.ko 2>/dev/null || true; \
 	fi
 	depmod -a $(KVER)
+	@$(MAKE) --no-print-directory check_deps
 
 sign-install:
 	@test -x $(SIGN_FILE) || { echo "$(SIGN_FILE) not found; install the kernel headers for $(KVER)"; exit 1; }
@@ -222,6 +224,44 @@ sign-install:
 			*"already in the enrollment request"*) echo "Signing key already queued: the MOK manager asks for your password on the next boot." ;; \
 			*) echo "$$msg"; echo "Enroll the key yourself, then reboot:"; echo "  sudo mokutil --import $(MOK_CERT)" ;; \
 		esac; fi; \
+	fi
+
+# What MT7927 multi-link operation (MLO) needs besides this driver. The values
+# are the ones the MLO path was proven on. A miss is reported and never stops
+# the install: without it the adapter still works, single-link.
+#   kernel      7.1 or newer. 7.1, 7.2 and 7.3 build; mac80211.c carries the
+#               7.3 change to the RX link interface. Older kernels are untested.
+#   supplicant  wpa_supplicant 2.11 or newer built with MLO; it was proven
+#               with a hostap development build. 2.10 and older, which many
+#               distros ship, associate single-link.
+#   firmware    mediatek/mt7927 from linux-firmware, in /lib/firmware.
+MLO_MIN_KERNEL ?= 7.1
+MLO_MIN_WPA    ?= 2.11
+
+check_deps:
+	@echo "Checking MT7927 MLO dependencies..."
+	@kmaj=$$(echo "$(KVER)" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/'); \
+	if [ "$$(printf '%s\n%s\n' "$(MLO_MIN_KERNEL)" "$$kmaj" | sort -V | head -n1)" = "$(MLO_MIN_KERNEL)" ]; then \
+		echo "  kernel $(KVER): ok"; \
+	else \
+		echo "  kernel $(KVER): older than $(MLO_MIN_KERNEL), MLO is untested there"; \
+	fi
+	@wpa=$$(command -v wpa_supplicant 2>/dev/null); \
+	if [ -z "$$wpa" ]; then \
+		echo "  wpa_supplicant: not found, MLO needs $(MLO_MIN_WPA) or newer built with MLO"; \
+	else \
+		wver=$$($$wpa -v 2>/dev/null | sed -nE '1s/^wpa_supplicant v([0-9]+\.[0-9]+).*/\1/p'); \
+		if [ -n "$$wver" ] && [ "$$(printf '%s\n%s\n' "$(MLO_MIN_WPA)" "$$wver" | sort -V | head -n1)" = "$(MLO_MIN_WPA)" ]; then \
+			echo "  wpa_supplicant $$wver ($$wpa): ok"; \
+		else \
+			echo "  wpa_supplicant $${wver:-unknown} ($$wpa): connects single-link, MLO needs $(MLO_MIN_WPA) or newer built with MLO"; \
+		fi; \
+	fi
+	@if [ -f $(FWDIR)/mt7927/WIFI_RAM_CODE_MT6639_2_1.bin ] || [ -f $(FWDIR)/mt7927/WIFI_RAM_CODE_MT6639_2_1.bin.zst ] || \
+	   [ -f $(FWDIR)/mt7927/WIFI_RAM_CODE_MT6639_2_1.bin.xz ] || [ -f $(FWDIR)/mt7927/WIFI_RAM_CODE_MT6639_2_1.bin.gz ]; then \
+		echo "  firmware $(FWDIR)/mt7927: ok"; \
+	else \
+		echo "  firmware $(FWDIR)/mt7927: missing, install linux-firmware"; \
 	fi
 
 install_fw:
