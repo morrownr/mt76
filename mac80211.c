@@ -1268,11 +1268,18 @@ EXPORT_SYMBOL(mt76_rx_signal);
 static void
 mt76_rx_convert(struct mt76_dev *dev, struct sk_buff *skb,
 		struct ieee80211_hw **hw,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
+		struct ieee80211_link_sta **link_sta)
+#else
 		struct ieee80211_sta **sta)
+#endif
 {
 	struct ieee80211_rx_status *status = IEEE80211_SKB_RXCB(skb);
 	struct ieee80211_hdr *hdr = mt76_skb_get_hdr(skb);
 	struct mt76_rx_status mstat;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
+	struct ieee80211_sta *sta;
+#endif
 
 	mstat = *((struct mt76_rx_status *)skb->cb);
 	memset(status, 0, sizeof(*status));
@@ -1313,17 +1320,28 @@ mt76_rx_convert(struct mt76_dev *dev, struct sk_buff *skb,
 	memcpy(status->chain_signal, mstat.chain_signal,
 	       sizeof(mstat.chain_signal));
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
+	/* mac80211 now derives RX link identity from the link STA argument. */
+	sta = wcid_to_sta(mstat.wcid);
+	if (!sta)
+		*link_sta = NULL;
+	else if (mstat.wcid->link_valid)
+		*link_sta = rcu_dereference(sta->link[mstat.wcid->link_id]);
+	else
+		*link_sta = &sta->deflink;
+#else
 	if (mstat.wcid) {
 		status->link_valid = mstat.wcid->link_valid;
 		status->link_id = mstat.wcid->link_id;
 	}
 
 	*sta = wcid_to_sta(mstat.wcid);
+#endif
 	*hw = mt76_phy_hw(dev, mstat.phy_idx);
 }
 
 static void
-mt76_check_ccmp_pn(struct sk_buff *skb)
+mt76_check_ccmp_pn(struct mt76_dev *dev, struct sk_buff *skb)
 {
 	struct mt76_rx_status *status = (struct mt76_rx_status *)skb->cb;
 	struct mt76_wcid *wcid = status->wcid;
@@ -1370,9 +1388,30 @@ skip_hdr_check:
 	ret = memcmp(status->iv, wcid->rx_key_pn[security_idx],
 		     sizeof(status->iv));
 	if (ret <= 0) {
+		if (mt76_chip(dev) == 0x7927 &&
+		    unlikely(READ_ONCE(mt76_mlo_diag_trace)))
+			printk(KERN_INFO
+			      "MLO_RX_PN_DROP: wcid=%u link=%d security_idx=%d incoming_pn=%02x%02x%02x%02x%02x%02x stored_pn=%02x%02x%02x%02x%02x%02x\n",
+			      wcid->idx, wcid->link_id, security_idx,
+			      status->iv[0], status->iv[1], status->iv[2],
+			      status->iv[3], status->iv[4], status->iv[5],
+			      wcid->rx_key_pn[security_idx][0],
+			      wcid->rx_key_pn[security_idx][1],
+			      wcid->rx_key_pn[security_idx][2],
+			      wcid->rx_key_pn[security_idx][3],
+			      wcid->rx_key_pn[security_idx][4],
+			      wcid->rx_key_pn[security_idx][5]);
 		status->flag |= RX_FLAG_ONLY_MONITOR;
 		return;
 	}
+
+	if (mt76_chip(dev) == 0x7927 &&
+	    unlikely(READ_ONCE(mt76_mlo_diag_trace)))
+		printk(KERN_INFO
+		      "MLO_RX_PN_OK: wcid=%u link=%d security_idx=%d pn=%02x%02x%02x%02x%02x%02x\n",
+		      wcid->idx, wcid->link_id, security_idx,
+		      status->iv[0], status->iv[1], status->iv[2],
+		      status->iv[3], status->iv[4], status->iv[5]);
 
 	memcpy(wcid->rx_key_pn[security_idx], status->iv, sizeof(status->iv));
 
@@ -1544,7 +1583,11 @@ mt76_check_sta(struct mt76_dev *dev, struct sk_buff *skb)
 void mt76_rx_complete(struct mt76_dev *dev, struct sk_buff_head *frames,
 		      struct napi_struct *napi)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
+	struct ieee80211_link_sta *sta;
+#else
 	struct ieee80211_sta *sta;
+#endif
 	struct ieee80211_hw *hw;
 	struct sk_buff *skb, *tmp;
 	LIST_HEAD(list);
@@ -1553,7 +1596,7 @@ void mt76_rx_complete(struct mt76_dev *dev, struct sk_buff_head *frames,
 	while ((skb = __skb_dequeue(frames)) != NULL) {
 		struct sk_buff *nskb = skb_shinfo(skb)->frag_list;
 
-		mt76_check_ccmp_pn(skb);
+		mt76_check_ccmp_pn(dev, skb);
 		skb_shinfo(skb)->frag_list = NULL;
 		mt76_rx_convert(dev, skb, &hw, &sta);
 		ieee80211_rx_list(hw, sta, skb, &list);
@@ -1635,7 +1678,12 @@ mt76_sta_add(struct mt76_phy *phy, struct ieee80211_vif *vif,
 		ewma_signal_init(&wcid->rssi);
 		rcu_assign_pointer(dev->wcid[wcid->idx], wcid);
 		mt76_wcid_init(wcid, phy->band_idx);
-	} else {
+	} else if (!ieee80211_vif_is_mld(vif)) {
+		/* For MLD vifs the driver assigns a per-link band_idx to
+		 * each affiliated link's own wcid (see e.g. mt7925's
+		 * link_sta_add/link_bss_add); phy->band_idx is a single
+		 * per-phy value and would clobber that per-link context.
+		 */
 		wcid->phy_idx = phy->band_idx;
 	}
 
@@ -2168,19 +2216,92 @@ u16 mt76_select_links(struct ieee80211_vif *vif, int max_active_links)
 	rcu_read_unlock();
 
 	for (i = 0; i < n_data; i++) {
-		int j;
+		enum nl80211_band pref_band, fallback_band;
+		int j, pick = -1;
 
 		if (!(BIT(data[i].link_id) & vif->active_links))
 			continue;
 
 		sel_links = BIT(data[i].link_id);
+
+		/* Anchor link (data[i]) is already active and cannot be
+		 * dropped. Pick the partner band that yields the best
+		 * pair: prefer completing {5GHz,6GHz}, else {2.4GHz,6GHz}.
+		 */
+		switch (data[i].band) {
+		case NL80211_BAND_6GHZ:
+			pref_band = NL80211_BAND_5GHZ;
+			fallback_band = NL80211_BAND_2GHZ;
+			break;
+		case NL80211_BAND_5GHZ:
+			pref_band = NL80211_BAND_6GHZ;
+			fallback_band = NL80211_BAND_2GHZ;
+			break;
+		default:
+			pref_band = NL80211_BAND_6GHZ;
+			fallback_band = NL80211_BAND_5GHZ;
+			break;
+		}
+
+		if (READ_ONCE(mt76_mlo_diag_trace))
+			printk(KERN_INFO "MLO_LINK_SELECT: anchor=link%u band=%u candidates=0x%x\n",
+			       data[i].link_id, data[i].band, (unsigned int)usable_links);
+
 		for (j = 0; j < n_data; j++) {
-			if (data[i].band != data[j].band) {
-				sel_links |= BIT(data[j].link_id);
-				if (hweight16(sel_links) == max_active_links)
-					break;
+			if (data[j].band == pref_band) {
+				pick = j;
+				break;
 			}
 		}
+		if (pick < 0) {
+			if (READ_ONCE(mt76_mlo_diag_trace))
+				printk(KERN_INFO "MLO_LINK_SELECT: preferred band=%u unavailable, trying fallback band=%u\n",
+				       pref_band, fallback_band);
+			for (j = 0; j < n_data; j++) {
+				if (data[j].band == fallback_band) {
+					pick = j;
+					break;
+				}
+			}
+		}
+		if (pick < 0) {
+			/* Neither preferred nor fallback band present;
+			 * fall back to the original first-different-band
+			 * ascending-index selection.
+			 */
+			if (READ_ONCE(mt76_mlo_diag_trace))
+				printk(KERN_INFO "MLO_LINK_SELECT: fallback band=%u also unavailable, using first differing band\n",
+				       fallback_band);
+			for (j = 0; j < n_data; j++) {
+				if (data[j].band != data[i].band) {
+					pick = j;
+					break;
+				}
+			}
+		}
+
+		if (pick >= 0) {
+			sel_links |= BIT(data[pick].link_id);
+			if (READ_ONCE(mt76_mlo_diag_trace))
+				printk(KERN_INFO "MLO_LINK_SELECT: selected pair=0x%x (anchor=link%u partner=link%u)\n",
+				       sel_links, data[i].link_id, data[pick].link_id);
+		} else if (READ_ONCE(mt76_mlo_diag_trace)) {
+			printk(KERN_INFO "MLO_LINK_SELECT: no partner link found for anchor=link%u\n",
+			       data[i].link_id);
+		}
+
+		/* max_active_links > 2 is not exercised by any current
+		 * caller; extend by adding remaining differing-band links
+		 * in ascending order until the cap is reached.
+		 */
+		if (max_active_links > 2) {
+			for (j = 0; j < n_data && hweight16(sel_links) < max_active_links; j++) {
+				if (!(sel_links & BIT(data[j].link_id)) &&
+				    data[j].band != data[i].band)
+					sel_links |= BIT(data[j].link_id);
+			}
+		}
+
 		break;
 	}
 

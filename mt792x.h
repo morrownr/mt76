@@ -10,6 +10,8 @@
 #include "mt76_connac_mcu.h"
 #include "mt792x_regs.h"
 #include "mt792x_acpi_sar.h"
+#include "mt7925/mlo_roc_state.h"
+#include "mt7925/mlo_completion.h"
 
 #define MT792x_PM_TIMEOUT	(HZ / 12)
 #define MT792x_HW_SCAN_TIMEOUT	(HZ / 10)
@@ -122,6 +124,31 @@ struct mt792x_link_sta {
 	struct mt792x_sta *sta;
 
 	struct ieee80211_link_sta *pri_link;
+
+	/* MLO TX-liveness tracking for the deterministic best-link selector
+	 * (mt7925_mlo_force_bulk_wcid(), mt792x_core.c / mlo_tx_liveness.h).
+	 * Snapshot of wcid.stats seen at the last classification call, plus
+	 * when rx_packets was last observed to actually advance -- proves
+	 * whether this link is currently delivering real RX instead of
+	 * trusting RSSI alone, which cannot tell a good-signal-but-RX-dead
+	 * link from a genuinely healthy one.
+	 */
+	u32 tx_liveness_rx_seen;
+	u32 tx_liveness_tx_seen;
+	unsigned long tx_liveness_rx_progress_jiffies;
+	bool tx_liveness_rx_ever_seen;
+
+	/* MLO datapath RX evidence (mt7925/mlo_valid_rx.h): unicast data
+	 * that passed cipher/ICV/FCS/MIC checks and decrypted. Unlike
+	 * wcid.stats.rx_packets it never counts frames the stack will drop.
+	 */
+	u32 mlo_valid_rx_packets;
+	unsigned long mlo_valid_rx_jiffies;
+	/* Firmware-live link withheld only for lack of RX proof in
+	 * mlo_await_generation; late valid RX may arm its readiness.
+	 */
+	bool mlo_await_valid_rx;
+	u32 mlo_await_generation;
 };
 
 /* compat: the cfg80211 NAN API arrived in kernel 7.2 */
@@ -155,6 +182,70 @@ struct mt792x_sta {
 	/* NAN peer schedule */
 	struct mt792x_sta_nan_sched nan_sched;
 #endif
+	/* Round-robin cursor for mt792x_sta_to_link()'s MLO TX link
+	 * selection: which active link this STA's next
+	 * IEEE80211_LINK_UNSPECIFIED-tagged packet should go to. Only ever
+	 * touched from that one call site.
+	 */
+	u8 mlo_tx_link_cursor;
+
+	/* TID->link pinning for the MLO bulk-TX scheduler
+	 * (mt7925_mlo_force_bulk_wcid(), mt792x_core.c). A TID's BA session
+	 * has one shared sequence-number space (mt76_txq.agg_ssn) but each
+	 * link has its own independent BA scoreboard (mt76_wcid.ampdu_state/
+	 * aggr[]); moving one TID's stream between links mid-session splits
+	 * that single sequence space across two independent scoreboards and
+	 * stalls it. So a TID is never moved mid-stream -- but the pin is not
+	 * permanent either: mlo_tid_link_ts[] below lets it expire and force
+	 * a clean re-pick (a fresh BA session on whichever link currently
+	 * scores best), so load balancing is dynamic over time instead of
+	 * "whichever link won the first packet, forever."
+	 * mlo_tid_link_valid[tid] false means "unmapped, pick one now".
+	 */
+	u8 mlo_tid_link[IEEE80211_NUM_TIDS];
+	bool mlo_tid_link_valid[IEEE80211_NUM_TIDS];
+	unsigned long mlo_tid_link_ts[IEEE80211_NUM_TIDS];
+
+	/* Restored (2026-08-23): jiffies timestamp of the last "STA_REC
+	 * published" event (mt7925_mac_link_sta_add() completing its MCU
+	 * calls) per link. 0 means never published. Used to compute
+	 * link_ready_state for MLO_TX_SELECT tracing and to gate
+	 * mt7925_mlo_force_bulk_wcid()'s use of a link -- this measures
+	 * driver/firmware-local readiness only, not AP-side link activation.
+	 */
+	unsigned long mlo_link_ready_jiffies[IEEE80211_MLD_MAX_NUM_LINKS];
+
+	/* TEST-ONLY (test_mt7927_defer_primary_authorize): links whose
+	 * primary STA_REC ASSOC authorize was withheld during a survivor
+	 * recreate because a partner link is being added in the same
+	 * transition. Cleared when the partner's MLD retouch authorizes it
+	 * with the full two-link list; anything still set at the end of the
+	 * add path is authorized as a fallback.
+	 */
+	u8 mlo_defer_auth_links;
+
+	/* STA-owned post-key-switch standalone SUB_LINK ROC pending state
+	 * and two-stage trigger (test_mt7927_sublink_postkey). Peer-owned,
+	 * not VIF-owned: activation needs a lifetime-safe struct
+	 * ieee80211_sta * for mt7925_mac_sta_add_links()/
+	 * mt7925_mac_link_sta_assoc(), and a VIF-only worker has no safe way
+	 * to rediscover the peer STA (ieee80211_find_sta() is RCU-only-valid;
+	 * mt792x_vif caches no peer pointer at all -- see the investigation
+	 * history for why this was tried and rejected first). Both work
+	 * items are initialized exactly once in mt7925_mac_sta_add(), before
+	 * either can be queued, and cancelled at MT76_STA_EVENT_DISASSOC,
+	 * which fires strictly before this object is freed and strictly
+	 * before dev->mt76.mutex is ever taken in that call path, making
+	 * cancellation deadlock-free against stage2 (which needs that
+	 * mutex).
+	 */
+	bool postkey_pending;
+	u8 postkey_sublink_id;
+	u8 postkey_survivor_id;
+	u32 postkey_generation;
+	bool postkey_roc_attempted;
+	struct wiphy_work postkey_stage1;
+	struct work_struct postkey_stage2;
 };
 
 DECLARE_EWMA(rssi, 10, 8);
@@ -192,6 +283,104 @@ struct mt792x_nan {
 	unsigned long conn_bitmap;
 };
 #endif
+struct mt7927_mlo_link_state {
+	bool negotiated;
+	bool resident;
+	bool traffic_active;
+	bool link_ready;
+	bool ptk_synced;
+	bool group_synced;
+	bool removing;
+	bool adding;
+	/* Set by mt7927_mlo_reassign_band() when this transition really moved the
+	 * link's DEV/BSS to another band slot; consumed by
+	 * mt7927_mlo_refresh_reassigned_sta() so a peer whose band did not move
+	 * is not destructively recreated.
+	 */
+	bool band_moved;
+	/* Explicit ROC/admission state, owned by mt7927_mlo_change_vif_links().
+	 * A link only becomes traffic-eligible in
+	 * mt7927_mlo_change_sta_links() when this is true AND
+	 * admitted_generation matches the vif's current
+	 * mt7927_mlo_state.transition_generation -- never inferred from
+	 * callback ordering, new_links, `created`, link_ready, or the
+	 * transient global phy->roc_grant (which is already consumed/reset
+	 * by the time the STA callback runs). The generation check exists so
+	 * a stale, delayed grant/timeout event from an earlier transition can
+	 * never authorize a link_id that has since been retired and
+	 * re-added.
+	 */
+	bool roc_admitted;
+	u32 admitted_generation;
+	u8 link_id;
+	u8 bss_idx;
+	u8 fw_context_slot;
+	u8 omac_idx;
+	u8 wmm_idx;
+	u16 peer_wcid;
+	u16 bmc_wcid;
+};
+
+struct mt7927_mlo_state {
+	/* last reported availability of each steering mode (avail + 1; 0 = unreported) */
+	u8 mode_avail_noted[4];
+	u8 mode_block_noted[4];
+	/* transition classes that completed with authenticated validation in the
+	 * association identified by steer_state_epoch (assoc_epoch + 1; 0 = unset)
+	 */
+	u8 verified_switch_classes;
+	u64 steer_state_epoch;
+	u16 negotiated_links;
+	u16 resident_links;
+	u16 traffic_active_links;
+	/* Post-regrant security rebind (test gate mlo_security_rebind): the
+	 * post-grant active set the STA_REC_MLD record must describe while
+	 * mac80211 has not yet published it, and the radio-group reincarnation
+	 * flag that marks every active link's firmware security binding stale.
+	 */
+	u16 rebind_target_links;
+	bool radio_group_reincarnated;
+	u8 primary_link_id;
+	u8 secondary_link_id;
+	u32 transition_generation;
+	/* Assoc-time JOIN deferral (mlo_join_wait_bss): set when
+	 * mt7925_mac_set_links() found the partner link BSS unregistered and
+	 * left the JOIN to mt7927_mlo_change_vif_links(); consumed there (or
+	 * dropped on teardown). join_deferred_links is the pair it wanted.
+	 */
+	bool join_deferred;
+	/* mlo_activate_after_auth: link activation requested at STA ASSOC is held
+	 * until the STA is authorized (4-way done). */
+	bool activate_deferred;
+	unsigned long activate_deferred_jiffies;
+	u16 join_deferred_links;
+	u32 join_deferred_gen;
+	u16 migration_from_links;
+	u16 migration_to_links;
+	/* Production pair transition (mlo_pair_transition.h). The transition
+	 * id is transition_generation; a completion for another generation
+	 * never mutates this record.
+	 */
+	u8 pt_state;
+	u8 pt_kind;
+	u8 pt_token;
+	s8 pt_link;
+	u8 pt_req_slot;
+	u8 pt_grant_slot;
+	u16 pt_old_links;
+	u16 pt_target_links;
+	u16 pt_survivor;
+	u16 pt_removed;
+	u16 pt_added;
+	/* Monotonic ns stamps of one transition (0 = not reached):
+	 * 0 requested, 1 survivor ownership released, 2 survivor re-JOIN sent,
+	 * 3 survivor grant, 4 survivor recovery started, 5 first survivor
+	 * secure RX, 6 incoming ACQUIRE sent, 7 incoming grant, 8 first
+	 * incoming secure RX, 9 converged.
+	 */
+	u64 pt_ns[10];
+	struct mt7927_mlo_link_state link[IEEE80211_MLD_MAX_NUM_LINKS];
+};
 
 struct mt792x_vif {
 	struct mt792x_bss_conf bss_conf; /* must be first */
@@ -213,7 +402,75 @@ struct mt792x_vif {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 	struct mt792x_nan nan;
 #endif
+	/* mt7925 MLO auto link-steering (see mt7925_mlo_steer_work()). The
+	 * firmware RSSI-monitor event carries no link/bss identifier, so
+	 * only one link can be armed at a time; mt7925_mlo_rotate_rssi_monitor()
+	 * cycles the monitor through every valid link each steering tick, so
+	 * each link's entry here is only refreshed roughly once per (tick
+	 * interval * number of valid links). MT792X_MLO_RSSI_UNKNOWN marks a
+	 * link that has never been sampled yet.
+	 */
+	s8 mlo_link_rssi[IEEE80211_MLD_MAX_NUM_LINKS];
+	unsigned long mlo_link_rssi_jiffies[IEEE80211_MLD_MAX_NUM_LINKS];
+	bool mlo_auto_steering;
+	bool mlo_rssi_monitor_enabled;
+	/* Link the firmware RSSI monitor is currently armed against. The
+	 * monitor event carries no bss/link identifier, so only one link
+	 * can ever be monitored at a time; mt7925_mlo_steer_work() rotates
+	 * this through every valid link each tick. Since the driver itself
+	 * commands which link is armed, attributing the next event to this
+	 * value is unambiguous even without a bss_idx in the event.
+	 */
+	u8 mlo_rssi_monitor_link_id;
+
+	/* Copy of what mt7925_mcu_sta_eht_mld_tlv() (mcu.c) last put into the
+	 * outgoing STA_REC_EHT_MLD TLV's str_cap[]/eml_cap[] -- those bytes
+	 * only ever live in a transient skb freed right after the MCU send,
+	 * so debugfs (mlo_str_cap) needs its own copy to read back.
+	 */
+	u8 mlo_adv_str_cap[3];
+	u8 mlo_adv_eml_cap[3];
+	bool mlo_adv_is_str;
+	unsigned long mlo_last_switch_jiffies;
+	struct delayed_work mlo_steer_work;
+	struct mt792x_mlo_completion mlo_completion;
+	struct mt792x_mlo_ticket mlo_steer_ticket;
+	struct mt7927_mlo_state mt7927_mlo;
+
+	/* Automatic exploratory steering FSM. A pair requiring a dormant
+	 * resident link with no live RSSI can only be judged by actually
+	 * activating it (see MLO_STEER_UNKNOWN handling, main.c) -- these
+	 * fields track that in-flight exploration so steer_work can validate
+	 * and, if the substitute proves bad, roll back automatically instead
+	 * of leaving a userspace tester to notice and fix it by hand.
+	 */
+	bool mlo_steer_validating;
+	/* Set once a failed validation has requested the rollback transition
+	 * but before vif->active_links has been confirmed back at
+	 * mlo_steer_prev_pair. Queue acceptance is not completion. The owned
+	 * wiphy operation must return from the synchronous core setter and
+	 * the same ticket must pass independent RX validation before either
+	 * forward or rollback can be confirmed. Pending ticks retain it.
+	 */
+	bool mlo_steer_rollback_pending;
+	u16 mlo_steer_prev_pair;
+	u16 mlo_steer_pending_pair;
+	unsigned long mlo_steer_validate_deadline;
+	/* Per-link cooldown after a failed exploratory substitution, so a
+	 * link that just proved bad isn't immediately re-tried next tick.
+	 */
+	unsigned long mlo_steer_link_cooldown[IEEE80211_MLD_MAX_NUM_LINKS];
+	/* Per-link counter snapshot taken at the instant a transition is
+	 * requested, so validation can require REAL tx/rx delta progress
+	 * instead of merely checking that the WCID/key exist.
+	 */
+	struct {
+		u64 tx_bytes, rx_bytes;
+		u32 tx_packets, rx_packets, airtime_us;
+	} mlo_steer_snapshot[IEEE80211_MLD_MAX_NUM_LINKS];
 };
+
+#define MT792X_MLO_RSSI_UNKNOWN		S8_MIN
 
 struct mt792x_phy {
 	struct mt76_phy *mt76;
@@ -246,12 +503,51 @@ struct mt792x_phy {
 	void *clc[MT792x_CLC_MAX_NUM];
 	u64 chip_cap;
 	u16 eml_cap;
+	/* Firmware MLO capability record (NIC_CAP tag 0x22), decoded as MediaTek's
+	 * CAP_MLO_CAP: the Windows driver stores the same bytes in nicCfgChipCapMlo
+	 * (0x1401192d0) and the vendor source calls it nicCfgChipCapMLO(). Only
+	 * the 16-bit non-AP EML capability used to be read, from the middle of it.
+	 */
+	struct {
+		bool valid;
+		u8 nonap_eml_support;
+		u8 ap_eml_support;
+		u8 max_simul_links;
+		u8 link3_band_limit;
+		u8 hybrid_mlo;
+		u16 nonap_eml_cap;
+		u16 ap_eml_cap;
+		u8 raw[12];
+	} mlo_fw_cap;
 
 	struct work_struct roc_work;
 	struct timer_list roc_timer;
 	wait_queue_head_t roc_wait;
 	u8 roc_token_id;
 	bool roc_grant;
+	/* MLO JOIN ROC reservation: the slots firmware has granted (held) are
+	 * kept apart from a request that is still in flight (pending). The
+	 * firmware keeps a reservation per (token, bss_idx), so every held
+	 * slot has to be released again under its owning token or it will
+	 * silently refuse the next multi-link ROC request. See
+	 * mt7925/mlo_roc_state.h.
+	 */
+	struct mt7925_mlo_roc_state mlo_roc;
+	/* Dedicated completion state for the standalone UNI_ROC_SUB_LINK
+	 * experiment (mt7925_set_sublink_roc()). Kept separate from
+	 * roc_grant/roc_token_id: the shared full-JOIN GRANT handler
+	 * (UNI_EVENT_ROC_GRANT, tag=0) must remain completely unaffected, and
+	 * a token match is required before this can be set -- a stale or
+	 * unrelated tag=0/tag=4 event must never satisfy this wait.
+	 * sublink_roc_token_id == 0 means no sublink ROC is outstanding.
+	 */
+	u8 sublink_roc_token_id;
+	/* test-only held-token attach (test_mt7927_mlo_roc_attach): set by the
+	 * SUB_LINK/GRANT handlers when the event matches mlo_roc.attach_pending.
+	 */
+	bool roc_attach_done;
+	bool sublink_roc_done;
+	u8 sublink_roc_status;
 };
 
 struct mt792x_irq_map {
@@ -349,6 +645,7 @@ struct mt792x_dev {
 	struct sk_buff_head ipv6_ns_list;
 
 	enum environment_cap country_ie_env;
+
 	u32 backup_l1;
 	u32 backup_l2;
 
@@ -392,13 +689,35 @@ mt792x_vif_to_link(struct mt792x_vif *mvif, u8 link_id)
 	return bss_conf ? bss_conf : &mvif->bss_conf;
 }
 
+/* Explicit-ID sampling by the ordinary steering validator is RCU protected,
+ * not protected by mt76.mutex. Never use the TX/unspecified-link selector.
+ */
+static inline struct mt792x_link_sta *
+mt792x_sta_link_rcu(struct mt792x_sta *msta, unsigned int link_id)
+{
+	struct ieee80211_vif *vif;
+
+	if (!msta || link_id >= IEEE80211_MLD_MAX_NUM_LINKS)
+		return NULL;
+	if (!msta->vif)
+		return &msta->deflink;
+	vif = container_of((void *)msta->vif, struct ieee80211_vif, drv_priv);
+	if (!ieee80211_vif_is_mld(vif))
+		return &msta->deflink;
+	return rcu_dereference(msta->link[link_id]);
+}
+
 static inline struct mt792x_link_sta *
 mt792x_sta_to_link(struct mt792x_sta *msta, u8 link_id)
 {
 	struct ieee80211_vif *vif;
 
-	vif = container_of((void *)msta->vif, struct ieee80211_vif, drv_priv);
+	if (!msta)
+		return NULL;
+	if (!msta->vif)
+		return &msta->deflink;
 
+	vif = container_of((void *)msta->vif, struct ieee80211_vif, drv_priv);
 	if (!ieee80211_vif_is_mld(vif) ||
 	    link_id >= IEEE80211_LINK_UNSPECIFIED)
 		return &msta->deflink;
@@ -490,6 +809,16 @@ struct mt76_wcid *mt792x_rx_get_wcid(struct mt792x_dev *dev, u16 idx,
 void mt792x_mac_update_mib_stats(struct mt792x_phy *phy);
 void mt792x_mac_set_timeing(struct mt792x_phy *phy);
 void mt792x_mac_work(struct work_struct *work);
+void mt7925_mlo_sample_load(struct mt792x_dev *dev);
+u32 mt7925_mlo_dbg_elapsed(u8 link_id);
+u32 mt7925_mlo_dbg_raw_util(u8 link_id);
+u32 mt7925_mlo_dbg_util(u8 link_id);
+u32 mt7925_mlo_dbg_delta(u8 link_id);
+u32 mt7925_mlo_dbg_spare(u8 link_id);
+u32 mt7925_mlo_dbg_weight(u8 link_id);
+u64 mt7925_mlo_dbg_placements(u8 link_id);
+u64 mt7925_mlo_dbg_cache_hits(u8 link_id);
+void mt7925_mlo_clear_tid_link(struct mt792x_sta *msta, int tid);
 void mt792x_remove_interface(struct ieee80211_hw *hw,
 			     struct ieee80211_vif *vif);
 void mt792x_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *control,

@@ -412,11 +412,35 @@ mt76_dma_tx_cleanup_idx(struct mt76_dev *dev, struct mt76_queue *q, int idx,
 static void
 mt76_dma_kick_queue(struct mt76_dev *dev, struct mt76_queue *q)
 {
+	u16 old_dma = mt76_dma_read_dma_idx(q, q->tail);
+	u16 old_cpu = Q_READ(q, cpu_idx);
+	u16 head = q->head;
+	bool eapol = false;
+	int i;
+
+	if (unlikely(mt76_mlo_diag_trace)) {
+		for (i = q->tail; i != head; i = (i + 1) % q->ndesc) {
+			struct mt76_txwi_cache *t = q->entry[i].txwi;
+
+			if (t && t != DMA_DUMMY_DATA && t->mlo_diag_eapol) {
+				eapol = true;
+				break;
+			}
+		}
+	}
+
 	wmb();
 	if (mt76_queue_is_emi(q))
 		*q->emi_cpu_idx = cpu_to_le16(q->head);
 	else
 		Q_WRITE(q, cpu_idx, q->head);
+
+	if (eapol)
+		printk(KERN_INFO
+		       "MLO_EAPOL_DMA_KICK: ring=%u tail=%u head=%u queued=%d cpu_before=%u cpu_after=%u dma_before=%u dma_after=%u\n",
+		       q->hw_idx, q->tail, head, q->queued, old_cpu,
+		       Q_READ(q, cpu_idx), old_dma,
+		       mt76_dma_read_dma_idx(q, q->tail));
 }
 
 static void
@@ -435,6 +459,20 @@ mt76_dma_tx_cleanup(struct mt76_dev *dev, struct mt76_queue *q, bool flush)
 		last = mt76_dma_read_dma_idx(q, -1);
 
 	while (q->queued > 0 && q->tail != last) {
+		struct mt76_txwi_cache *diag_t = q->entry[q->tail].txwi;
+		bool diag_eapol = diag_t && diag_t != DMA_DUMMY_DATA &&
+				  diag_t->mlo_diag_eapol;
+		u16 diag_tail = q->tail;
+
+		if (diag_eapol)
+			printk(KERN_INFO
+			       "MLO_EAPOL_DMA_CONSUMED: token=%u pid=%u ring=%u slot=%u hw_dma_idx=%d head=%u queued=%d desc=%08x/%08x/%08x/%08x\n",
+			       diag_t->mlo_diag_token, diag_t->mlo_diag_pid,
+			       q->hw_idx, diag_tail, last, q->head, q->queued,
+			       le32_to_cpu(q->desc[diag_tail].buf0),
+			       le32_to_cpu(q->desc[diag_tail].ctrl),
+			       le32_to_cpu(q->desc[diag_tail].buf1),
+			       le32_to_cpu(q->desc[diag_tail].info));
 		mt76_dma_tx_cleanup_idx(dev, q, q->tail, &entry);
 		mt76_npu_txdesc_cleanup(q, q->tail);
 		mt76_queue_tx_complete(dev, q, &entry);

@@ -810,9 +810,10 @@ mt76_connac_mcu_sta_he_tlv(struct sk_buff *skb, struct ieee80211_sta *sta)
 }
 
 void
-mt76_connac_mcu_sta_he_tlv_v2(struct sk_buff *skb, struct ieee80211_sta *sta)
+mt76_connac_mcu_sta_he_tlv_v2(struct sk_buff *skb,
+			      struct ieee80211_link_sta *link_sta)
 {
-	struct ieee80211_sta_he_cap *he_cap = &sta->deflink.he_cap;
+	struct ieee80211_sta_he_cap *he_cap = &link_sta->he_cap;
 	struct ieee80211_he_cap_elem *elem = &he_cap->he_cap_elem;
 	struct sta_rec_he_v2 *he;
 	struct tlv *tlv;
@@ -823,7 +824,7 @@ mt76_connac_mcu_sta_he_tlv_v2(struct sk_buff *skb, struct ieee80211_sta *sta)
 	memcpy(he->he_phy_cap, elem->phy_cap_info, sizeof(he->he_phy_cap));
 	memcpy(he->he_mac_cap, elem->mac_cap_info, sizeof(he->he_mac_cap));
 
-	switch (sta->deflink.bandwidth) {
+	switch (link_sta->bandwidth) {
 	case IEEE80211_STA_RX_BW_160:
 		if (elem->phy_cap_info[0] &
 		    IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_80PLUS80_MHZ_IN_5G)
@@ -950,7 +951,7 @@ void mt76_connac_mcu_sta_tlv(struct mt76_phy *mphy, struct sk_buff *skb,
 	/* starec he */
 	if (sta->deflink.he_cap.has_he) {
 		mt76_connac_mcu_sta_he_tlv(skb, sta);
-		mt76_connac_mcu_sta_he_tlv_v2(skb, sta);
+		mt76_connac_mcu_sta_he_tlv_v2(skb, &sta->deflink);
 		if (band == NL80211_BAND_6GHZ &&
 		    sta_state == MT76_STA_INFO_STATE_ASSOC) {
 			struct sta_rec_he_6g_capa *he_6g_capa;
@@ -1194,6 +1195,50 @@ void mt76_connac_mcu_wtbl_ba_tlv(struct mt76_dev *dev, struct sk_buff *skb,
 }
 EXPORT_SYMBOL_GPL(mt76_connac_mcu_wtbl_ba_tlv);
 
+/* EXPERIMENT (A/B isolation of mt76_connac_mcu_uni_add_dev()): which
+ * sub-command to skip when programming a non-primary (secondary MLO) link.
+ * 0 = skip nothing (real behavior). 1 = skip MCU_UNI_CMD(DEV_INFO_UPDATE).
+ * 2 = skip MCU_UNI_CMD(BSS_INFO_UPDATE). Only applies when mvif->link_idx
+ * != 0 (i.e. not the first/primary link programmed for this vif) -- the
+ * primary link's own add_dev call, made during single-link association,
+ * is never affected.
+ */
+u8 mt76_mlo_bssadd_skip;
+EXPORT_SYMBOL_GPL(mt76_mlo_bssadd_skip);
+/* 4=reverse order, 5=force dev active=0, 6=force bss conn_state=0 (secondary only) */
+u32 mt76_mlo_bssadd_delay_ms;
+EXPORT_SYMBOL_GPL(mt76_mlo_bssadd_delay_ms);
+
+/* skip==10: stash the secondary BSS_INFO_UPDATE payload here instead of
+ * sending it immediately; mt76_mlo_bssinfo_deferred_send() (called from
+ * mt7925_set_key() once the primary link's real key install happens)
+ * sends it later. Single-slot: this driver only ever has one secondary
+ * link in flight at a time. Direct call, not a workqueue -- set_key()
+ * already runs in normal process context, not atomic.
+ */
+static struct mt76_dev *mt76_mlo_deferred_dev;
+static u32 mt76_mlo_deferred_cmd;
+static u8 mt76_mlo_deferred_payload[64];
+static int mt76_mlo_deferred_len;
+static bool mt76_mlo_deferred_pending;
+
+void mt76_mlo_bssinfo_deferred_send(void)
+{
+	if (!mt76_mlo_deferred_pending)
+		return;
+	mt76_mlo_deferred_pending = false;
+	if (!mt76_mlo_deferred_dev || !is_mt7927(mt76_mlo_deferred_dev))
+		return;
+
+	if (unlikely(mt76_mlo_diag_trace))
+		printk(KERN_INFO "MLO_BSSINFO_DEFERRED_SENT: cmd=0x%x len=%d\n",
+		      mt76_mlo_deferred_cmd, mt76_mlo_deferred_len);
+
+	mt76_mcu_send_msg(mt76_mlo_deferred_dev, mt76_mlo_deferred_cmd,
+			  mt76_mlo_deferred_payload, mt76_mlo_deferred_len, true);
+}
+EXPORT_SYMBOL_GPL(mt76_mlo_bssinfo_deferred_send);
+
 int mt76_connac_mcu_uni_add_dev(struct mt76_phy *phy,
 				struct ieee80211_bss_conf *bss_conf,
 				struct mt76_vif_link *mvif,
@@ -1201,6 +1246,8 @@ int mt76_connac_mcu_uni_add_dev(struct mt76_phy *phy,
 				bool enable)
 {
 	struct mt76_dev *dev = phy->dev;
+	/* These shared-module knobs/telemetry are MT7927 experiments. */
+	bool mlo = is_mt7927(dev);
 	struct {
 		struct {
 			u8 omac_idx;
@@ -1283,26 +1330,148 @@ int mt76_connac_mcu_uni_add_dev(struct mt76_phy *phy,
 	idx = mvif->omac_idx > EXT_BSSID_START ? HW_BSSID_0 : mvif->omac_idx;
 	basic_req.basic.hw_bss_idx = idx;
 
+	/* EXPERIMENT (A/B test): real trace showed hw_bss_idx computed as
+	 * omac_idx, which is 0 for every MLO link (all links share omac 0
+	 * by design) -- so the secondary link's BSS_INFO_UPDATE claims the
+	 * same hw_bss_idx=0 as the primary's own live BSS context. Force a
+	 * distinct value for non-primary links to test whether that
+	 * collision is what corrupts primary-link firmware TX state.
+	 */
+	if (mlo && mvif->link_idx && mt76_mlo_bssadd_skip == 3) {
+		basic_req.basic.hw_bss_idx = mvif->link_idx;
+		if (unlikely(mt76_mlo_diag_trace))
+			printk(KERN_INFO
+			      "MLO_HWBSSIDX_OVERRIDE: link_idx=%u forced_hw_bss_idx=%u\n",
+			      mvif->link_idx, basic_req.basic.hw_bss_idx);
+	}
+
 	memcpy(dev_req.tlv.omac_addr, bss_conf->addr, ETH_ALEN);
 
-	cmd = enable ? MCU_UNI_CMD(DEV_INFO_UPDATE) : MCU_UNI_CMD(BSS_INFO_UPDATE);
-	data = enable ? (void *)&dev_req : (void *)&basic_req;
-	len = enable ? sizeof(dev_req) : sizeof(basic_req);
+	/* Exp 3/4/5: force secondary link's transitions/fields. Command
+	 * still sent -- this only mutates the payload before it goes out.
+	 */
+	if (mlo && mvif->link_idx && mt76_mlo_bssadd_skip == 5)
+		dev_req.tlv.active = 0;
+	if (mlo && mvif->link_idx && mt76_mlo_bssadd_skip == 6)
+		basic_req.basic.conn_state = 0;
+	if (mlo && mvif->link_idx && mt76_mlo_bssadd_skip == 7)
+		basic_req.basic.sta_idx = cpu_to_le16((u16)mt76_mlo_bssadd_delay_ms);
+	if (mlo && mvif->link_idx && mt76_mlo_bssadd_skip == 8)
+		basic_req.basic.sta_idx = cpu_to_le16(0xffff);
+	if (mlo && mvif->link_idx && mt76_mlo_bssadd_skip == 9)
+		basic_req.basic.conn_type = 0;
 
-	err = mt76_mcu_send_msg(dev, cmd, data, len, true);
-	if (err && cmd == MCU_UNI_CMD(BSS_INFO_UPDATE))
-		err = mt76_connac_mcu_bss_deact_err(dev, err, enable);
+	if (mlo && unlikely(mt76_mlo_diag_trace)) {
+		printk(KERN_INFO
+		      "MLO_BSSINFO_TX: link=%u bss=%u omac=%u band=%u wmm=%u active=%u conn_state=%u sta=%u conn_type=0x%x hw_bss=%u\n",
+		      mvif->link_idx, basic_req.hdr.bss_idx,
+		      basic_req.basic.omac_idx, basic_req.basic.band_idx,
+		      basic_req.basic.wmm_idx, basic_req.basic.active,
+		      basic_req.basic.conn_state,
+		      le16_to_cpu(basic_req.basic.sta_idx),
+		      le32_to_cpu(basic_req.basic.conn_type),
+		      basic_req.basic.hw_bss_idx);
+		printk(KERN_INFO
+		      "MLO_DEVINFO_TX: link_id=%u link_idx=%u omac=%u band=%u active=%u dev_link_idx=%u bss=%u wcid=%u\n",
+		      bss_conf->link_id, mvif->link_idx, dev_req.hdr.omac_idx,
+		      dev_req.hdr.band_idx, dev_req.tlv.active,
+		      dev_req.tlv.link_idx, mvif->idx, wcid->idx);
+	}
 
-	if (err < 0)
-		return err;
+	{
+		struct { u32 cmd; void *data; int len; const char *name; } ops[2] = {
+			{ enable ? MCU_UNI_CMD(DEV_INFO_UPDATE) : MCU_UNI_CMD(BSS_INFO_UPDATE),
+			  enable ? (void *)&dev_req : (void *)&basic_req,
+			  enable ? sizeof(dev_req) : sizeof(basic_req), "dev" },
+			{ enable ? MCU_UNI_CMD(BSS_INFO_UPDATE) : MCU_UNI_CMD(DEV_INFO_UPDATE),
+			  enable ? (void *)&basic_req : (void *)&dev_req,
+			  enable ? sizeof(basic_req) : sizeof(dev_req), "bss" },
+		};
+		int i, order[2] = {0, 1};
 
-	cmd = enable ? MCU_UNI_CMD(BSS_INFO_UPDATE) : MCU_UNI_CMD(DEV_INFO_UPDATE);
-	data = enable ? (void *)&basic_req : (void *)&dev_req;
-	len = enable ? sizeof(basic_req) : sizeof(dev_req);
+		/* Exp 1: reverse order for secondary links only. */
+		if (mlo && mvif->link_idx && mt76_mlo_bssadd_skip == 4) {
+			order[0] = 1;
+			order[1] = 0;
+		}
 
-	err = mt76_mcu_send_msg(dev, cmd, data, len, true);
-	if (err && cmd == MCU_UNI_CMD(BSS_INFO_UPDATE))
-		err = mt76_connac_mcu_bss_deact_err(dev, err, enable);
+		for (i = 0; i < 2; i++) {
+			int oi = order[i];
+
+			cmd = ops[oi].cmd;
+			data = ops[oi].data;
+			len = ops[oi].len;
+
+			if (mlo && unlikely(mt76_mlo_diag_trace))
+				printk(KERN_INFO
+				      "MLO_BSSADD_MCU: op=%d(%s) cmd=0x%x link_idx=%u bss_idx=%u omac_idx=%u wcid=%u enable=%d\n",
+				      i + 1, ops[oi].name, cmd, mvif->link_idx,
+				      mvif->idx, mvif->omac_idx, wcid->idx, enable);
+
+			if (mlo && mvif->link_idx && mt76_mlo_bssadd_skip == 10 &&
+			    cmd == MCU_UNI_CMD(BSS_INFO_UPDATE)) {
+				mt76_mlo_deferred_dev = dev;
+				mt76_mlo_deferred_cmd = cmd;
+				mt76_mlo_deferred_len = min_t(int, len,
+							      sizeof(mt76_mlo_deferred_payload));
+				memcpy(mt76_mlo_deferred_payload, data, mt76_mlo_deferred_len);
+				mt76_mlo_deferred_pending = true;
+				if (unlikely(mt76_mlo_diag_trace))
+					printk(KERN_INFO "MLO_BSSINFO_DEFERRED_QUEUED: cmd=0x%x link_idx=%u len=%d\n",
+					      cmd, mvif->link_idx, mt76_mlo_deferred_len);
+				err = 0;
+			} else if (mlo && mvif->link_idx &&
+			    ((mt76_mlo_bssadd_skip == 1 && cmd == MCU_UNI_CMD(DEV_INFO_UPDATE)) ||
+			     (mt76_mlo_bssadd_skip == 2 && cmd == MCU_UNI_CMD(BSS_INFO_UPDATE)))) {
+				if (unlikely(mt76_mlo_diag_trace))
+					printk(KERN_INFO "MLO_BSSADD_MCU_SKIPPED: cmd=0x%x link_idx=%u\n",
+					      cmd, mvif->link_idx);
+				err = 0;
+			} else {
+				u64 t0 = 0, t1;
+
+				if (mlo && unlikely(mt76_mlo_diag_trace)) {
+					t0 = ktime_get_ns();
+					printk(KERN_INFO "MLO_MCU_SEND_START: cmd=0x%x link=%u t=%llu\n",
+					      cmd, mvif->link_idx, t0);
+					if (ieee80211_vif_is_mld(bss_conf->vif)) {
+						printk(KERN_INFO
+						       "MLO_FW_DEV_BSS_RAW: cmd=0x%x op=%s link_id=%u link_idx=%u len=%d\n",
+						       cmd, ops[oi].name, bss_conf->link_id,
+						       mvif->link_idx, len);
+						print_hex_dump(KERN_INFO, "MLO_FW_DEV_BSS_RAW: ",
+							       DUMP_PREFIX_OFFSET, 16, 1,
+							       data, len, false);
+					}
+				}
+
+				err = mt76_mcu_send_msg(dev, cmd, data, len, true);
+				if (err && cmd == MCU_UNI_CMD(BSS_INFO_UPDATE))
+					err = mt76_connac_mcu_bss_deact_err(dev, err, enable);
+
+				if (mlo && unlikely(mt76_mlo_diag_trace)) {
+					t1 = ktime_get_ns();
+					printk(KERN_INFO "MLO_MCU_SEND_DONE: cmd=0x%x link=%u ret=%d duration_us=%llu\n",
+					      cmd, mvif->link_idx, err, (t1 - t0) / 1000);
+				}
+			}
+
+			if (mlo && unlikely(mt76_mlo_diag_trace))
+				printk(KERN_INFO "MLO_BSSADD_MCU_STATUS: cmd=0x%x link_idx=%u ret=%d\n",
+				      cmd, mvif->link_idx, err);
+
+			if (err < 0)
+				return err;
+
+			/* Exp 2: delay between the two commands, secondary links only. */
+			if (mlo && i == 0 && mvif->link_idx && mt76_mlo_bssadd_delay_ms) {
+				if (unlikely(mt76_mlo_diag_trace))
+					printk(KERN_INFO "MLO_BSSADD_DELAY: link_idx=%u delay_ms=%u\n",
+					      mvif->link_idx, mt76_mlo_bssadd_delay_ms);
+				mdelay(mt76_mlo_bssadd_delay_ms);
+			}
+		}
+	}
 
 	return err;
 }

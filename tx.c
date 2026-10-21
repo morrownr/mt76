@@ -4,6 +4,13 @@
  */
 
 #include "mt76.h"
+#include "trace.h"
+
+/* Temporary, evidence-only MLO descriptor tracing. Disabled by default and
+ * controlled through mt7925 debugfs mlo_diag_trace.
+ */
+bool mt76_mlo_diag_trace;
+EXPORT_SYMBOL_GPL(mt76_mlo_diag_trace);
 
 static int
 mt76_txq_get_qid(struct ieee80211_txq *txq)
@@ -479,6 +486,72 @@ mt76_txq_stopped(struct mt76_queue *q)
 	       q->queued + MT_TXQ_FREE_THR >= q->ndesc;
 }
 
+/* EXPERIMENTAL: per-skb MLO link selection.
+ *
+ * A mac80211 TXQ is per-(sta, tid) and carries no link identity, so choosing
+ * a link once per TXQ would pin every BE flow to a single link. Selection has
+ * to happen per skb, after dequeue, so that distinct flows can land on
+ * different links while a single flow stays on one link.
+ *
+ * Falls back to the caller's wcid whenever no hook is registered or the hook
+ * declines, so single-link operation is bit-for-bit unchanged.
+ */
+static struct mt76_wcid *
+mt76_mlo_select_wcid(struct mt76_dev *dev, struct mt76_wcid *wcid,
+		     struct ieee80211_sta *sta,
+		     struct sk_buff *skb)
+{
+	struct mt76_wcid *sel;
+
+	if (!dev->drv->tx_select_wcid || !sta)
+		return wcid;
+
+	sel = dev->drv->tx_select_wcid(dev, wcid, sta, skb);
+	if (!sel || test_bit(MT_WCID_FLAG_PS, &sel->flags))
+		return wcid;
+
+	return sel;
+}
+
+static void
+mt76_mlo_trace_select(struct mt76_dev *dev, struct sk_buff *skb,
+		      struct ieee80211_txq *txq, struct mt76_txq *mtxq,
+		      enum mt76_txq_id qid, struct mt76_wcid *orig,
+		      struct mt76_wcid *selected)
+{
+	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+	struct mt76_mlo_tx_select_trace v = {};
+	u8 da[ETH_ALEN] = {};
+
+	if (mt76_chip(dev) != 0x7927 || !READ_ONCE(mt76_mlo_diag_trace))
+		return;
+
+	if ((info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP) &&
+	    skb->len >= ETH_HLEN)
+		ether_addr_copy(da, skb->data);
+	else if (skb->len >= sizeof(struct ieee80211_hdr_3addr))
+		ether_addr_copy(da, ((struct ieee80211_hdr *)skb->data)->addr1);
+	v = (struct mt76_mlo_tx_select_trace) {
+		.hash = skb->hash, .protocol = ntohs(skb->protocol),
+		.orig_wcid = orig->idx, .sel_wcid = selected->idx,
+		.path = 0, .priority = skb->priority, .txq_tid = txq->tid,
+		.qid = qid, .orig_link = orig->link_id, .orig_phy = orig->phy_idx,
+		.sel_link = selected->link_id, .sel_phy = selected->phy_idx,
+		.info_link = u32_get_bits(info->control.flags, IEEE80211_TX_CTRL_MLO_LINK),
+		.l4_hash = skb->l4_hash, .sw_hash = skb->sw_hash,
+		.aggr = mtxq->aggr, .sta_present = !!txq->sta,
+		.vif_present = !!txq->vif,
+	};
+	{
+		struct mt76_mlo_pkt_sig sig;
+
+		mt76_mlo_skb_pkt_sig(skb, &sig);
+		mt76_mlo_tx_select_set_pkt_sig(&v, &sig);
+	}
+	ether_addr_copy(v.da, da);
+	trace_mlo_tx_select(dev, &v);
+}
+
 static int
 mt76_txq_send_burst(struct mt76_phy *phy, struct mt76_queue *q,
 		    struct mt76_txq *mtxq, struct mt76_wcid *wcid)
@@ -487,6 +560,7 @@ mt76_txq_send_burst(struct mt76_phy *phy, struct mt76_queue *q,
 	struct ieee80211_txq *txq = mtxq_to_txq(mtxq);
 	enum mt76_txq_id qid = mt76_txq_get_qid(txq);
 	struct ieee80211_tx_info *info;
+	struct mt76_wcid *tx_wcid;
 	struct sk_buff *skb;
 	int n_frames = 1;
 	bool stop = false;
@@ -503,13 +577,16 @@ mt76_txq_send_burst(struct mt76_phy *phy, struct mt76_queue *q,
 	if (!skb)
 		return 0;
 
+	tx_wcid = mt76_mlo_select_wcid(dev, wcid, txq->sta, skb);
+	mt76_mlo_trace_select(dev, skb, txq, mtxq, qid, wcid, tx_wcid);
+
 	info = IEEE80211_SKB_CB(skb);
-	if (!(wcid->tx_info & MT_WCID_TX_INFO_SET))
+	if (!(tx_wcid->tx_info & MT_WCID_TX_INFO_SET))
 		ieee80211_get_tx_rates(txq->vif, txq->sta, skb,
 				       info->control.rates, 1);
 
 	spin_lock(&q->lock);
-	idx = __mt76_tx_queue_skb(phy, qid, skb, wcid, txq->sta, &stop);
+	idx = __mt76_tx_queue_skb(phy, qid, skb, tx_wcid, txq->sta, &stop);
 	spin_unlock(&q->lock);
 	if (idx < 0)
 		return idx;
@@ -525,13 +602,17 @@ mt76_txq_send_burst(struct mt76_phy *phy, struct mt76_queue *q,
 		if (!skb)
 			break;
 
+		tx_wcid = mt76_mlo_select_wcid(dev, wcid, txq->sta, skb);
+		mt76_mlo_trace_select(dev, skb, txq, mtxq, qid, wcid,
+				      tx_wcid);
+
 		info = IEEE80211_SKB_CB(skb);
-		if (!(wcid->tx_info & MT_WCID_TX_INFO_SET))
+		if (!(tx_wcid->tx_info & MT_WCID_TX_INFO_SET))
 			ieee80211_get_tx_rates(txq->vif, txq->sta, skb,
 					       info->control.rates, 1);
 
 		spin_lock(&q->lock);
-		idx = __mt76_tx_queue_skb(phy, qid, skb, wcid, txq->sta, &stop);
+		idx = __mt76_tx_queue_skb(phy, qid, skb, tx_wcid, txq->sta, &stop);
 		spin_unlock(&q->lock);
 		if (idx < 0)
 			break;

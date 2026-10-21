@@ -13,6 +13,11 @@ mt7925_common_git-y := mac.o mcu.o regd.o main.o init.o debugfs.o
 ifeq ($(shell [ $(VERSION) -gt 7 -o \( $(VERSION) -eq 7 -a $(PATCHLEVEL) -ge 2 \) ] && echo y),y)
 mt7925_common_git-y += nan.o
 endif
+mt7925_common_git-y += mlo/mlo.o mlo/ttlm.o mlo/pairs.o mlo/steering.o
+mt7925_common_git-y += mlo/association.o mlo/lifecycle.o mlo/completion.o
+mt7925_common_git-y += mlo/radio.o mlo/datapath.o mlo/tx.o
+mt7925_common_git-y += mlo/peer.o mlo/recovery.o mlo/severity.o
+mt7925_common_git-y += mlo/tx_context.o
 mt7925_common_git-$(CONFIG_NL80211_TESTMODE) += testmode.o
 mt7925e_git-y := pci.o pci_mac.o pci_mcu.o cached_cal.o
 mt7925u_git-y := usb.o

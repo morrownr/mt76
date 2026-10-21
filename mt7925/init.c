@@ -7,9 +7,78 @@
 #include <linux/thermal.h>
 #include <linux/firmware.h>
 #include "mt7925.h"
+#include "mlo/pairs.h"
 #include "regd.h"
 #include "mac.h"
 #include "mcu.h"
+
+/* MT7927 DBDC/MBMC provisioning.
+ *
+ * The MediaTek Windows driver (mtkwecx.sys) sends the MBMC/DBDC enable
+ * command (UNI CID 0x28, UNI_MBMC_SETTING) only for MT7925 (0x7925) and
+ * MT7921-class (0x717) parts, always paired with an antenna-path change
+ * that halves NSS from 2x2 to 1x1 -- i.e. it splits a single 2x2 die into
+ * two 1x1 band chains so that two links can be held concurrently.
+ * MT7927 (0x7927) is excluded from every DBDC decision path in that driver
+ * and is instead provisioned via the INF with StaMloMode=1 (verified on
+ * live hardware: adapter registry reads StaMloMode=dword:00000001), which
+ * pins it to exactly two links without any DBDC split.
+ *
+ * Linux does the inverse: it enables DBDC unconditionally and exclusively
+ * for MT7927, and never performs the paired NSS adjustment.
+ *
+ * TESTED 2026-08-10 on MT7927 (PCI 14c3:7927), AP UniFi UCG-UX7:
+ *   mt7927_dbdc=0 -> 0/3 associations succeeded (SME auth times out)
+ *   mt7927_dbdc=1 -> 3/3 associations succeeded, 3 links each
+ * DBDC is therefore REQUIRED for MT7927 to associate under Linux; the
+ * Windows divergence does not transfer. Default stays enabled. The
+ * parameter is retained only to re-run that A/B experiment.
+ */
+bool mt7925_mt7927_dbdc = true;
+EXPORT_SYMBOL_GPL(mt7925_mt7927_dbdc);
+module_param_named(mt7927_dbdc, mt7925_mt7927_dbdc, bool, 0644);
+MODULE_PARM_DESC(mt7927_dbdc,
+		 "enable DBDC/MBMC on MT7927 (default 1; 0 breaks association - test only)");
+
+/* IEEE 802.11be "Maximum Number of Simultaneous Links" is encoded as (N - 1).
+ * 0 => one simultaneous link (upstream default), 1 => two.
+ */
+u8 mt7925_mlo_max_simul_links = MT7925_MLO_SIMUL_LINKS_AUTO;
+EXPORT_SYMBOL_GPL(mt7925_mlo_max_simul_links);
+module_param_named(mlo_max_simul_links, mt7925_mlo_max_simul_links, byte, 0644);
+MODULE_PARM_DESC(mlo_max_simul_links,
+		 "advertised MLD max simultaneous links, encoded as N-1; 255 = per-chip default");
+
+/* Release multi-link (JOIN) ROC reservations back to the firmware. Test-only
+ * switch: turning this off restores the previous behaviour, where the
+ * reservation is leaked and the next multi-link ROC request is never granted.
+ */
+u8 mt7925_mlo_roc_release = 3;
+EXPORT_SYMBOL_GPL(mt7925_mlo_roc_release);
+module_param_named(mlo_roc_release, mt7925_mlo_roc_release, byte, 0644);
+MODULE_PARM_DESC(mlo_roc_release,
+		 "bitmask: 1=per-link abort in roc_iter, 2=release JOIN slots of removed links at teardown (survivor slot kept), 8=legacy release-all (default 3)");
+
+/* Hand the driver 802.11 frames instead of 802.3 encap-offload frames on
+ * MT7927. The mlo_tx_pn_owner_live_link split in mt7925e only handles native
+ * DATA; this is the same effect as mt792x_lib's test_mt7927_no_tx_encap but
+ * lives in mt7925_common so the shared core (and the MT7921 stack holding it)
+ * need not be reloaded. Read once at wiphy init, so it needs a reload.
+ */
+static bool mt7925_mlo_native_tx;
+module_param_named(mlo_native_tx, mt7925_mlo_native_tx, bool, 0444);
+MODULE_PARM_DESC(mlo_native_tx,
+		 "TEST-ONLY: clear SUPPORTS_TX_ENCAP_OFFLOAD on MT7927 so data is native 802.11 (default N)");
+
+/* Low-rate MLO control-plane markers (ROC request/grant/abort, pair
+ * transition states, continuity guard, key/STA lifecycle). Independent of
+ * the per-packet mlo_diag_trace so transitions can be observed under load.
+ */
+bool mt7925_mlo_ctl_trace;
+EXPORT_SYMBOL_GPL(mt7925_mlo_ctl_trace);
+module_param_named(mlo_ctl_trace, mt7925_mlo_ctl_trace, bool, 0644);
+MODULE_PARM_DESC(mlo_ctl_trace,
+		 "print low-rate MLO control-plane markers without enabling per-packet mlo_diag_trace");
 
 static ssize_t mt7925_thermal_temp_show(struct device *dev,
 					struct device_attribute *attr,
@@ -117,7 +186,7 @@ static int __mt7925_init_hardware(struct mt792x_dev *dev)
 	if (ret)
 		goto out;
 
-	if (is_mt7927(&dev->mt76)) {
+	if (is_mt7927(&dev->mt76) && mt7925_mt7927_dbdc) {
 		ret = mt7925_mcu_set_dbdc(&dev->mphy, true);
 		if (ret) {
 			dev_warn(dev->mt76.dev,
@@ -309,6 +378,11 @@ int mt7925_register_device(struct mt792x_dev *dev)
 	ret = mt792x_init_wiphy(hw);
 	if (ret)
 		return ret;
+	if (is_mt7927(&dev->mt76))
+		hw->vif_data_size = sizeof(struct mt7925_mlo_vif);
+
+	if (is_mt7927(&dev->mt76) && mt7925_mlo_native_tx)
+		__clear_bit(IEEE80211_HW_SUPPORTS_TX_ENCAP_OFFLOAD, hw->flags);
 
 	hw->wiphy->reg_notifier = mt7925_regd_notifier;
 	dev->mphy.sband_2g.sband.ht_cap.cap |=

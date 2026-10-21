@@ -18,6 +18,8 @@ void mt792x_mac_work(struct work_struct *work)
 	mt792x_mutex_acquire(phy->dev);
 
 	mt76_update_survey(mphy);
+	if (mphy->dev->drv->tx_update_load)
+		mphy->dev->drv->tx_update_load(mphy->dev);
 	if (++mphy->mac_work_count == 2) {
 		mphy->mac_work_count = 0;
 

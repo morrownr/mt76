@@ -9,6 +9,17 @@ static bool mt7925_disable_clc;
 module_param_named(disable_clc, mt7925_disable_clc, bool, 0644);
 MODULE_PARM_DESC(disable_clc, "disable CLC support");
 
+/*
+ * TEST-ONLY: permit controlled MT7927E MLO testing on platforms whose ACPI
+ * MTCL table has no MT7927-specific BE authorization. This does not replace
+ * the required platform/BIOS correction and must remain disabled normally.
+ */
+static bool mt7925_test_mt7927_eht_override;
+module_param_named(test_mt7927_eht_override,
+		   mt7925_test_mt7927_eht_override, bool, 0644);
+MODULE_PARM_DESC(test_mt7927_eht_override,
+		 "TEST-ONLY: override MT7927E EHT capability gate");
+
 static struct ieee80211_regdomain mt7925_regd_ww = {
 	.n_reg_rules = 1,
 	.alpha2 =  "00",
@@ -27,23 +38,61 @@ bool mt7925_regd_clc_supported(struct mt792x_dev *dev)
 	return true;
 }
 
+static u32
+mt7925_regd_get_mtcl_conf(struct mt792x_phy *phy, char *alpha2)
+{
+	u32 config = mt792x_acpi_get_mtcl_conf(phy, alpha2);
+#ifdef CONFIG_ACPI
+	struct mt792x_acpi_sar *sar = phy->acpisar;
+	struct mt792x_asar_cl_v3 *cl;
+
+	if (config == MT792X_ACPI_MTCL_INVALID || (config & 0x30) ||
+	    !is_mt7927(&phy->dev->mt76) || !phy->dev->mt76.dev ||
+	    strcmp(dev_name(phy->dev->mt76.dev), "0000:07:00.0") ||
+	    !sar || sar->ver != 3)
+		return config;
+
+	cl = sar->countrylist_v3;
+	/* MT7927's BIOS WF7 mode 2 is driver-controlled, independently of
+	 * the BE bitmap. Limit this prototype correction to the verified DUT;
+	 * preserve legacy MTCL and the later CLC/country gates.
+	 */
+	if (cl && !memcmp(cl->names, "MTCL", sizeof(cl->names)) &&
+	    cl->version == 3 && cl->mode_be == 2)
+		config = (config & ~0x30) | 0x20;
+#endif
+	return config;
+}
+
 void mt7925_regd_be_ctrl(struct mt792x_dev *dev, u8 *alpha2)
 {
 	struct mt792x_phy *phy = &dev->phy;
 	struct mt7925_clc_rule_v2 *rule;
 	struct mt7925_clc *clc;
 	bool old = dev->has_eht, new = true;
-	u32 mtcl_conf = mt792x_acpi_get_mtcl_conf(&dev->phy, alpha2);
+	u32 mtcl_conf = mt7925_regd_get_mtcl_conf(&dev->phy, alpha2);
 	u8 *pos;
+
+	dev_info(dev->mt76.dev,
+		 "MLO_EHT_CAP_TRACE: be_ctrl enter chip=0x%x mt7927=%d alpha2=%c%c old_has_eht=%d mtcl=0x%08x clc_be=%p\n",
+		 mt76_chip(&dev->mt76), is_mt7927(&dev->mt76),
+		 alpha2[0], alpha2[1], old, mtcl_conf,
+		 phy->clc[MT792x_CLC_BE_CTRL]);
 
 	if (mtcl_conf != MT792X_ACPI_MTCL_INVALID &&
 	    (((mtcl_conf >> 4) & 0x3) == 0)) {
+		dev_info(dev->mt76.dev,
+			 "MLO_EHT_CAP_TRACE: be_ctrl DISABLE reason=MTCL bits[5:4]==0 mtcl=0x%08x\n",
+			 mtcl_conf);
 		new = false;
 		goto out;
 	}
 
-	if (!phy->clc[MT792x_CLC_BE_CTRL])
+	if (!phy->clc[MT792x_CLC_BE_CTRL]) {
+		dev_info(dev->mt76.dev,
+			 "MLO_EHT_CAP_TRACE: be_ctrl ENABLE reason=no BE-control CLC table\n");
 		goto out;
+	}
 
 	clc = (struct mt7925_clc *)phy->clc[MT792x_CLC_BE_CTRL];
 	pos = clc->data;
@@ -53,6 +102,9 @@ void mt7925_regd_be_ctrl(struct mt792x_dev *dev, u8 *alpha2)
 
 		if (rule->alpha2[0] == alpha2[0] &&
 		    rule->alpha2[1] == alpha2[1]) {
+			dev_info(dev->mt76.dev,
+				 "MLO_EHT_CAP_TRACE: be_ctrl DISABLE reason=CLC alpha2 match rule=%c%c flag=0x%02x\n",
+				 rule->alpha2[0], rule->alpha2[1], rule->flag);
 			new = false;
 			break;
 		}
@@ -65,6 +117,15 @@ void mt7925_regd_be_ctrl(struct mt792x_dev *dev, u8 *alpha2)
 	}
 
 out:
+	if (mt7925_test_mt7927_eht_override && is_mt7927(&dev->mt76)) {
+		dev_warn(dev->mt76.dev,
+			 "TEST-ONLY MT7927E EHT capability override enabled: ignoring MTCL/CLC EHT disable result\n");
+		new = true;
+	}
+
+	dev_info(dev->mt76.dev,
+		 "MLO_EHT_CAP_TRACE: be_ctrl result old_has_eht=%d new_has_eht=%d changed=%d\n",
+		 old, new, old != new);
 	if (old == new)
 		return;
 
@@ -82,7 +143,7 @@ mt7925_regd_channel_update(struct wiphy *wiphy, struct mt792x_dev *dev)
 	struct ieee80211_supported_band *sband;
 	struct mt76_dev *mdev = &dev->mt76;
 	struct ieee80211_channel *ch;
-	u32 mtcl_conf = mt792x_acpi_get_mtcl_conf(&dev->phy, mdev->alpha2);
+	u32 mtcl_conf = mt7925_regd_get_mtcl_conf(&dev->phy, mdev->alpha2);
 	int i;
 
 	if (mtcl_conf != MT792X_ACPI_MTCL_INVALID) {

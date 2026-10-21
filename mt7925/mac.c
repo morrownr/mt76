@@ -9,6 +9,10 @@
 #include "regd.h"
 #include "mac.h"
 #include "mcu.h"
+#include "../trace.h"
+#include "mlo/datapath.h"
+
+
 
 bool mt7925_mac_wtbl_update(struct mt792x_dev *dev, int idx, u32 mask)
 {
@@ -87,9 +91,20 @@ static void mt7925_mac_sta_poll(struct mt792x_dev *dev)
 			memset(mlink->airtime_ac, 0, sizeof(mlink->airtime_ac));
 		}
 
-		if (!mlink->wcid.sta)
+		if (!mlink->wcid.sta || !msta)
 			continue;
 
+		/* Defense in depth: msta == mlink->sta, read into a local
+		 * above the list_del_init() of this same poll entry. wcid.sta
+		 * and mlink->sta are cleared by separate stores in the
+		 * removal path (proven live, see the ordering fix in
+		 * mt7925_mac_sta_remove_links()) and are not guaranteed
+		 * atomic with each other from this side. Checking msta here
+		 * too, right before it is fed to container_of(), costs
+		 * nothing and removes any remaining window where a NULL msta
+		 * gets container_of()'d into a bogus near-NULL sta pointer
+		 * that mac80211 then dereferences and crashes on.
+		 */
 		sta = container_of((void *)msta, struct ieee80211_sta,
 				   drv_priv);
 		for (i = 0; i < IEEE80211_NUM_ACS; i++) {
@@ -394,6 +409,36 @@ mt7925_mac_fill_rx(struct mt792x_dev *dev, struct sk_buff *skb)
 
 	memset(status, 0, sizeof(*status));
 
+	/* DIAG (mlo_diag_trace only): account every unicast RXD by firmware WLAN_IDX and band BEFORE any early return,
+	 * and report the ones the code below drops silently (AMSDU error, header-translated cipher mismatch) or marks
+	 * (CM/CLM/ICV/FCS), so a downlink that "never arrives" can be told apart from one that is dropped here.
+	 */
+	if (unlikely(READ_ONCE(mt76_mlo_diag_trace)) &&
+	    FIELD_GET(MT_RXD3_NORMAL_ADDR_TYPE, rxd3) == MT_RXD3_NORMAL_U2M) {
+		static unsigned long diag_cnt[4][2];
+		u8 db = FIELD_GET(MT_RXD1_NORMAL_BAND_IDX, rxd1);
+		bool bad = (rxd2 & MT_RXD2_NORMAL_AMSDU_ERR) ||
+			   (rxd1 & (MT_RXD1_NORMAL_CM | MT_RXD1_NORMAL_CLM | MT_RXD1_NORMAL_ICV_ERR)) ||
+			   (rxd3 & MT_RXD3_NORMAL_FCS_ERR);
+		bool early = (rxd2 & MT_RXD2_NORMAL_AMSDU_ERR) ||
+			     ((rxd2 & MT_RXD2_NORMAL_HDR_TRANS) && (rxd1 & MT_RXD1_NORMAL_CM));
+
+		diag_cnt[db][bad]++;
+		if (bad)
+			printk_ratelimited(KERN_INFO
+			       "MLO_RX_EARLY: fw_idx=%u band_idx=%u chfreq=%u sec_mode=%lu cm=%d clm=%d icv=%d fcs=%d amsdu_err=%d hdr_trans=%d early_drop=%d\n",
+			       (u32)FIELD_GET(MT_RXD1_NORMAL_WLAN_IDX, rxd1), db,
+			       (u32)FIELD_GET(MT_RXD3_NORMAL_CH_FREQ, rxd3),
+			       (unsigned long)FIELD_GET(MT_RXD2_NORMAL_SEC_MODE, rxd2),
+			       !!(rxd1 & MT_RXD1_NORMAL_CM), !!(rxd1 & MT_RXD1_NORMAL_CLM),
+			       !!(rxd1 & MT_RXD1_NORMAL_ICV_ERR), !!(rxd3 & MT_RXD3_NORMAL_FCS_ERR),
+			       !!(rxd2 & MT_RXD2_NORMAL_AMSDU_ERR), !!(rxd2 & MT_RXD2_NORMAL_HDR_TRANS),
+			       early);
+		if (!((diag_cnt[db][0] + diag_cnt[db][1]) % 1000))
+			printk(KERN_INFO "MLO_RX_U2M_COUNT: band_idx=%u ok=%lu flagged=%lu\n",
+			       db, diag_cnt[db][0], diag_cnt[db][1]);
+	}
+
 	if (!test_bit(MT76_STATE_RUNNING, &mphy->state))
 		return -EINVAL;
 
@@ -413,12 +458,24 @@ mt7925_mac_fill_rx(struct mt792x_dev *dev, struct sk_buff *skb)
 	idx = FIELD_GET(MT_RXD1_NORMAL_WLAN_IDX, rxd1);
 	status->wcid = mt792x_rx_get_wcid(dev, idx, unicast);
 
-	if (status->wcid) {
-		mlink = container_of(status->wcid, struct mt792x_link_sta, wcid);
-		mt76_wcid_add_poll(&dev->mt76, &mlink->wcid);
-	}
+	if (unlikely(mt76_mlo_diag_trace) && unicast)
+		printk(KERN_INFO
+		      "MLO_RX_UNICAST_TRACE: fw_idx=%u resolved_wcid=%d resolved_link=%d chfreq=%u\n",
+		      idx, status->wcid ? status->wcid->idx : -1,
+		      status->wcid ? status->wcid->link_id : -1, chfreq);
 
 	mt792x_get_status_freq_info(status, chfreq);
+	mt7925_mlo_rx_route(dev, status, unicast, idx,
+			     FIELD_GET(MT_RXD1_NORMAL_BAND_IDX, rxd1));
+	mlink = status->wcid ?
+		container_of(status->wcid, struct mt792x_link_sta, wcid) : NULL;
+
+	if (status->wcid) {
+		mt76_wcid_add_poll(&dev->mt76, &mlink->wcid);
+		/* TEST-ONLY: per-link RX accounting */
+		status->wcid->stats.rx_bytes += skb->len;
+		status->wcid->stats.rx_packets++;
+	}
 
 	switch (status->band) {
 	case NL80211_BAND_5GHZ:
@@ -451,6 +508,17 @@ mt7925_mac_fill_rx(struct mt792x_dev *dev, struct sk_buff *skb)
 		status->flag |= RX_FLAG_IV_STRIPPED;
 		status->flag |= RX_FLAG_MMIC_STRIPPED | RX_FLAG_MIC_STRIPPED;
 	}
+
+	if (unlikely(READ_ONCE(mt76_mlo_diag_trace)) && unicast && status->wcid)
+		printk(KERN_INFO
+		      "MLO_RX_DECRYPT_TRACE: wcid=%u link=%d sec_mode=%lu clm=%d cm=%d icv_err=%d fcs_err=%d tkip_mic_err=%d decrypted=%d\n",
+		      status->wcid->idx, status->wcid->link_id,
+		      (unsigned long)FIELD_GET(MT_RXD2_NORMAL_SEC_MODE, rxd2),
+		      !!(rxd1 & MT_RXD1_NORMAL_CLM), !!(rxd1 & MT_RXD1_NORMAL_CM),
+		      !!(rxd1 & MT_RXD1_NORMAL_ICV_ERR),
+		      !!(rxd3 & MT_RXD3_NORMAL_FCS_ERR),
+		      !!(rxd1 & MT_RXD1_NORMAL_TKIP_MIC_ERR),
+		      !!(status->flag & RX_FLAG_DECRYPTED));
 
 	remove_pad = FIELD_GET(MT_RXD2_NORMAL_HDR_OFFSET, rxd2);
 
@@ -612,6 +680,32 @@ mt7925_mac_fill_rx(struct mt792x_dev *dev, struct sk_buff *skb)
 		status->flag |= RX_FLAG_8023;
 	}
 
+	if (unlikely(mt76_mlo_diag_trace)) {
+		struct mt7925_mlo_rx_diag d;
+		int wcid_idx = -1, link_id = -1;
+
+		mt7925_mlo_rx_diag_parse(skb, status->flag,
+			FIELD_GET(MT_RXD2_NORMAL_SEC_MODE, rxd2), status->amsdu, &d);
+		if (status->wcid) {
+			wcid_idx = status->wcid->idx;
+			link_id = status->wcid->link_id;
+		}
+		trace_mlo_rx(&dev->mt76, wcid_idx, link_id, status->band,
+			     chfreq, d.sa, d.da, &d.sig,
+			     FIELD_GET(MT_RXD2_NORMAL_SEC_MODE, rxd2),
+			     FIELD_GET(MT_RXD1_NORMAL_KEY_ID, rxd1),
+			     !!(status->flag & RX_FLAG_DECRYPTED), status->flag);
+		printk(KERN_INFO
+		       "MLO_RX_IDENTITY: wcid=%d link=%d band=%u freq=%u len=%u eth=%u mac_valid=%u ip_valid=%u l4_valid=%u truncated=%u fc=%04x sn=%u frag=%u tid=%u ra=%pM ta=%pM sa=%pM da=%pM l3=%04x l4=%u ip=%pI4>%pI4 ip_id=%u ports=%u>%u tcp_seq=%u tcp_ack=%u icmp=%u/%u id=%u seq=%u rxd1=%08x rxd2=%08x rxd3=%08x flags=%08x\n",
+		       wcid_idx, link_id, status->band, status->freq, skb->len,
+		       !!(status->flag & RX_FLAG_8023), d.mac_valid, d.ip_valid,
+		       d.l4_valid, d.truncated, d.fc, d.seq_ctrl >> 4, d.seq_ctrl & 0xf,
+		       d.tid, d.ra, d.ta, d.sa, d.da, d.sig.l3_proto, d.sig.l4_proto,
+		       &d.src_ip, &d.dst_ip, d.ip_id, d.sport, d.dport,
+		       d.tcp_seq, d.tcp_ack, d.sig.icmp_type, d.sig.icmp_code,
+		       d.sig.icmp_id, d.sig.icmp_seq, rxd1, rxd2, rxd3, status->flag);
+	}
+
 	mt792x_mac_assoc_rssi(dev, skb);
 
 	if (rxv && !(status->flag & RX_FLAG_8023)) {
@@ -627,6 +721,8 @@ mt7925_mac_fill_rx(struct mt792x_dev *dev, struct sk_buff *skb)
 		}
 	}
 
+	mt7925_mlo_rx_account(skb, unicast, fc, rxd1, rxd2, rxd3);
+
 	if (!status->wcid || !ieee80211_is_data_qos(fc))
 		return 0;
 
@@ -635,6 +731,71 @@ mt7925_mac_fill_rx(struct mt792x_dev *dev, struct sk_buff *skb)
 	status->qos_ctl = qos_ctl;
 
 	return 0;
+}
+
+void mt7925_mac_ampdu_link(struct mt792x_dev *dev, struct mt76_wcid *wcid,
+			    struct ieee80211_ampdu_params *params)
+{
+	enum ieee80211_ampdu_mlme_action action = params->action;
+	u16 tid = params->tid;
+	u16 ssn = params->ssn;
+
+	switch (action) {
+	case IEEE80211_AMPDU_RX_START:
+		mt76_rx_aggr_start(&dev->mt76, wcid, tid,
+				   ssn, params->buf_size);
+		break;
+	case IEEE80211_AMPDU_RX_STOP:
+		mt76_rx_aggr_stop(&dev->mt76, wcid, tid);
+		break;
+	case IEEE80211_AMPDU_TX_START:
+		set_bit(tid, &wcid->ampdu_state);
+		break;
+	case IEEE80211_AMPDU_TX_STOP_FLUSH:
+	case IEEE80211_AMPDU_TX_STOP_FLUSH_CONT:
+	case IEEE80211_AMPDU_TX_STOP_CONT:
+		clear_bit(tid, &wcid->ampdu_state);
+		break;
+	default:
+		break;
+	}
+}
+
+int mt7925_mac_ampdu_action(struct mt792x_dev *dev, struct ieee80211_vif *vif,
+			   struct ieee80211_ampdu_params *params,
+			   struct mt76_txq *mtxq)
+{
+	enum ieee80211_ampdu_mlme_action action = params->action;
+	int ret = 0;
+
+	switch (action) {
+	case IEEE80211_AMPDU_RX_START:
+		mt7925_mcu_uni_rx_ba(dev, params, vif, true);
+		break;
+	case IEEE80211_AMPDU_RX_STOP:
+		mt7925_mcu_uni_rx_ba(dev, params, vif, false);
+		break;
+	case IEEE80211_AMPDU_TX_OPERATIONAL:
+		mtxq->aggr = true;
+		mtxq->send_bar = false;
+		mt7925_mcu_uni_tx_ba(dev, params, vif, true);
+		break;
+	case IEEE80211_AMPDU_TX_STOP_FLUSH:
+	case IEEE80211_AMPDU_TX_STOP_FLUSH_CONT:
+		mtxq->aggr = false;
+		mt7925_mcu_uni_tx_ba(dev, params, vif, false);
+		break;
+	case IEEE80211_AMPDU_TX_START:
+		ret = IEEE80211_AMPDU_TX_START_IMMEDIATE;
+		break;
+	case IEEE80211_AMPDU_TX_STOP_CONT:
+		mtxq->aggr = false;
+		mt7925_mcu_uni_tx_ba(dev, params, vif, false);
+		break;
+	default:
+		break;
+	}
+	return ret;
 }
 
 static void
@@ -768,6 +929,15 @@ mt7925_mac_write_txwi(struct mt76_dev *dev, __le32 *txwi,
 	bool inband_disc = !!(changed & (BSS_CHANGED_UNSOL_BCAST_PROBE_RESP |
 					 BSS_CHANGED_FILS_DISCOVERY));
 	struct mt792x_bss_conf *mconf;
+
+	if (!vif && wcid->sta) {
+		struct mt792x_link_sta *mlink;
+
+		mlink = container_of(wcid, struct mt792x_link_sta, wcid);
+		if (mlink->sta)
+			vif = container_of((void *)mlink->sta->vif,
+					   struct ieee80211_vif, drv_priv);
+	}
 
 	mconf = vif ? mt792x_vif_to_link((struct mt792x_vif *)vif->drv_priv,
 					 wcid->link_id) : NULL;
@@ -944,13 +1114,43 @@ mt7925_mac_add_txs_skb(struct mt792x_dev *dev, struct mt76_wcid *wcid,
 	bool cck = false;
 	u32 txrate, txs, mode, stbc;
 
+	txs = le32_to_cpu(txs_data[0]);
+	if (unlikely(mt76_mlo_diag_trace)) {
+		u8 ack_error = FIELD_GET(MT_TXS0_ACK_ERROR_MASK, txs);
+
+		trace_mlo_txs(mdev, wcid->idx, wcid->link_id, pid, ack_error,
+			      !ack_error, FIELD_GET(MT_TXS0_TX_RATE, txs),
+			      FIELD_GET(MT_TXS0_BW, txs),
+			      FIELD_GET(MT_TXS2_BAND,
+					le32_to_cpu(txs_data[2])),
+			      wcid->phy_idx);
+	}
+
 	mt76_tx_status_lock(mdev, &list);
 	skb = mt76_tx_status_skb_get(mdev, wcid, pid, &list);
-	if (!skb)
+	if (!skb) {
+		if (unlikely(mt76_mlo_diag_trace))
+			printk(KERN_INFO
+			      "MLO_TXS_NO_SKB: wcid=%u link_id=%u pid=%d ack_error=%u txs_wcid=%u\n",
+			      wcid->idx, wcid->link_id, pid,
+			      (u32)FIELD_GET(MT_TXS0_ACK_ERROR_MASK, txs),
+			      (u32)FIELD_GET(MT_TXS2_WCID, le32_to_cpu(txs_data[2])));
 		goto out_no_skb;
+	}
 
-	txs = le32_to_cpu(txs_data[0]);
 	info = IEEE80211_SKB_CB(skb);
+	if (unlikely(mt76_mlo_diag_trace) &&
+	    (info->control.flags & IEEE80211_TX_CTRL_PORT_CTRL_PROTO))
+		printk(KERN_INFO
+		      "MLO_EAPOL_TXS: wcid=%u link_id=%u pid=%d ack_timeout=%u rts_timeout=%u queue_timeout=%u ba_error=%u txrate_raw=0x%x bw=%u\n",
+		      wcid->idx, wcid->link_id, pid,
+		      !!(txs & MT_TXS0_ACK_TIMEOUT),
+		      !!(txs & MT_TXS0_RTS_TIMEOUT),
+		      !!(txs & MT_TXS0_QUEUE_TIMEOUT),
+		      !!(txs & MT_TXS0_BA_ERROR),
+		      (u32)FIELD_GET(MT_TXS0_TX_RATE, txs),
+		      (u32)FIELD_GET(MT_TXS0_BW, txs));
+
 	if (!(txs & MT_TXS0_ACK_ERROR_MASK))
 		info->flags |= IEEE80211_TX_STAT_ACK;
 
@@ -1255,6 +1455,13 @@ void mt7925_mac_add_txs(struct mt792x_dev *dev, void *data)
 	wcidx = le32_get_bits(txs_data[2], MT_TXS2_WCID);
 	pid = le32_get_bits(txs_data[3], MT_TXS3_PID);
 
+	if (unlikely(mt76_mlo_diag_trace)) {
+		printk(KERN_INFO "MLO_EAPOL_RAWS_TXS: wcid=%u pid=%u\n",
+		       wcidx, pid);
+		print_hex_dump(KERN_INFO, "MLO_EAPOL_RAWS_TXS: ",
+			       DUMP_PREFIX_OFFSET, 16, 1, data, 32, false);
+	}
+
 	if (pid < MT_PACKET_ID_FIRST)
 		return;
 
@@ -1320,6 +1527,7 @@ mt7925_mac_tx_free(struct mt792x_dev *dev, void *data, int len)
 	struct sk_buff *skb, *tmp;
 	void *end = data + len;
 	bool wake = false;
+	u8 attempts = 0, tx_status = 0;
 	u16 total, count = 0;
 
 	/* clean DMA queues and unmap buffers first */
@@ -1347,6 +1555,11 @@ mt7925_mac_tx_free(struct mt792x_dev *dev, void *data, int len)
 			idx = FIELD_GET(MT_TXFREE_INFO_WLAN_ID, info);
 			wcid = mt76_wcid_ptr(dev, idx);
 			sta = wcid_to_sta(wcid);
+			if (unlikely(mt76_mlo_diag_trace))
+				printk(KERN_INFO
+				       "MLO_TX_DISPATCH: stage=txfree_pair raw_wcid=%u resolved=%px link=%d sta=%u info=0x%08x\n",
+				       idx, wcid, wcid ? wcid->link_id : -1,
+				       !!sta, info);
 			if (!sta)
 				continue;
 
@@ -1356,8 +1569,10 @@ mt7925_mac_tx_free(struct mt792x_dev *dev, void *data, int len)
 		}
 
 		if (info & MT_TXFREE_INFO_HEADER) {
+			attempts = FIELD_GET(MT_TXFREE_INFO_COUNT, info);
+			tx_status = FIELD_GET(MT_TXFREE_INFO_STAT, info);
 			if (wcid) {
-				u32 count = FIELD_GET(MT_TXFREE_INFO_COUNT, info);
+				u32 count = attempts;
 
 				wcid->stats.tx_retries += count ? count - 1 : 0;
 				wcid->stats.tx_failed +=
@@ -1372,9 +1587,24 @@ mt7925_mac_tx_free(struct mt792x_dev *dev, void *data, int len)
 				continue;
 
 			count++;
+			if (unlikely(mt76_mlo_diag_trace) && msdu == 0)
+				printk(KERN_INFO
+				       "MLO_EAPOL_RAWS_TXFREE: token=0 wcid=%u attempts=%u status=%u raw_info=0x%08x\n",
+				       wcid ? wcid->idx : 0xffff, attempts,
+				       tx_status, info);
 			txwi = mt76_token_release(mdev, msdu, &wake);
 			if (!txwi)
 				continue;
+			if (unlikely(mt76_mlo_diag_trace) && wcid)
+				trace_mlo_txfree(mdev, wcid->idx, wcid->link_id,
+						 msdu, attempts, tx_status,
+						 !!tx_status);
+			if (unlikely(mt76_mlo_diag_trace))
+				printk(KERN_INFO
+				       "MLO_TX_DISPATCH: stage=txfree_token token=%u pair_wcid=%d pair_link=%d attempts=%u status=%u has_txwi=%u\n",
+				       msdu, wcid ? wcid->idx : -1,
+				       wcid ? wcid->link_id : -1, attempts,
+				       tx_status, !!txwi);
 
 			mt7925_txwi_free(dev, txwi, sta, wcid, &free_list);
 		}
@@ -1393,6 +1623,7 @@ mt7925_mac_tx_free(struct mt792x_dev *dev, void *data, int len)
 	}
 }
 
+
 bool mt7925_rx_check(struct mt76_dev *mdev, void *data, int len)
 {
 	struct mt792x_dev *dev = container_of(mdev, struct mt792x_dev, mt76);
@@ -1401,6 +1632,7 @@ bool mt7925_rx_check(struct mt76_dev *mdev, void *data, int len)
 	enum rx_pkt_type type;
 
 	type = le32_get_bits(rxd[0], MT_RXD0_PKT_TYPE);
+	mt7925_mlo_raw_completion(dev, type, data, len);
 	if (type != PKT_TYPE_NORMAL) {
 		u32 sw_type = le32_get_bits(rxd[0], MT_RXD0_SW_PKT_TYPE_MASK);
 
@@ -1435,6 +1667,7 @@ void mt7925_queue_rx_skb(struct mt76_dev *mdev, enum mt76_rxq_id q,
 	u16 flag;
 
 	type = le32_get_bits(rxd[0], MT_RXD0_PKT_TYPE);
+	mt7925_mlo_raw_completion(dev, type, skb->data, skb->len);
 	flag = le32_get_bits(rxd[0], MT_RXD0_PKT_FLAG);
 	if (type != PKT_TYPE_NORMAL) {
 		u32 sw_type = le32_get_bits(rxd[0], MT_RXD0_SW_PKT_TYPE_MASK);
@@ -1530,6 +1763,8 @@ void mt7925_mac_reset_work(struct work_struct *work)
 
 	dev_dbg(dev->mt76.dev, "chip reset\n");
 	dev->hw_full_reset = true;
+	ieee80211_iterate_active_interfaces_atomic(hw, 0,
+					 mt7925_mlo_completion_reset_iter, NULL);
 	ieee80211_stop_queues(hw);
 
 	cancel_delayed_work_sync(&dev->mphy.mac_work);

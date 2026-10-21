@@ -2,6 +2,7 @@
 /* Copyright (C) 2023 MediaTek Inc. */
 
 #include "mt792x.h"
+#include "dma.h"
 
 static void
 mt792x_ampdu_stat_read_phy(struct mt792x_phy *phy,
@@ -115,9 +116,9 @@ int mt792x_queues_read(struct seq_file *s, void *data)
 			continue;
 
 		seq_printf(s,
-			   "%s:	queued=%d head=%d tail=%d\n",
+			   "%s:	queued=%d head=%d tail=%d cpu_idx=%u dma_idx=%u\n",
 			   queue_map[i].queue, q->queued, q->head,
-			   q->tail);
+			   q->tail, Q_READ(q, cpu_idx), Q_READ(q, dma_idx));
 	}
 
 	return 0;

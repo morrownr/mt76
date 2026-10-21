@@ -3,11 +3,21 @@
 
 #include <linux/fs.h>
 #include <linux/firmware.h>
+#include <linux/moduleparam.h>
+#include <crypto/sha2.h>
 #include "mt7925.h"
 #include "regd.h"
 #include "mcu.h"
 #include "mac.h"
 #include "nan.h"
+#include "mlo_roc_state.h"
+#include "mlo_pair_transition.h"
+#include "mlo/radio.h"
+#include "mlo/peer.h"
+#include "mlo/pairs.h"
+#include "mlo/mlo.h"
+
+
 
 /* compat: kernel 7.2 renamed the EML delay masks (EMLSR_ -> EML_);
  * the values are unchanged.
@@ -328,17 +338,22 @@ static void
 mt7925_mcu_connection_loss_iter(void *priv, u8 *mac,
 				struct ieee80211_vif *vif)
 {
-	struct mt76_vif_link *mvif = (struct mt76_vif_link *)vif->drv_priv;
+	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
 	struct mt7925_uni_beacon_loss_event *event = priv;
-
-	if (mvif->idx != event->hdr.bss_idx)
-		return;
 
 	if (!(vif->driver_flags & IEEE80211_VIF_BEACON_FILTER) ||
 	    vif->type != NL80211_IFTYPE_STATION)
 		return;
 
-	ieee80211_connection_loss(vif);
+	if (!ieee80211_vif_is_mld(vif)) {
+		if (mvif->bss_conf.mt76.idx != event->hdr.bss_idx)
+			return;
+
+		ieee80211_connection_loss(vif);
+		return;
+	}
+
+	mt7927_mlo_radio_beacon_loss(vif, event->hdr.bss_idx);
 }
 
 static void
@@ -353,6 +368,69 @@ mt7925_mcu_connection_loss_event(struct mt792x_dev *dev, struct sk_buff *skb)
 	ieee80211_iterate_active_interfaces_atomic(mphy->hw,
 					IEEE80211_IFACE_ITER_RESUME_ALL,
 					mt7925_mcu_connection_loss_iter, event);
+}
+
+/* Trace-only: remembers what each JOIN TLV asked for so a later grant event
+ * can be matched back to a link. Never read by driver logic.
+ */
+struct mt7925_radio_req_rec {
+	bool valid;
+	u8 token, bss_idx, link_id, dbdcband;
+};
+static struct mt7925_radio_req_rec mt7925_radio_req_recs[8];
+static unsigned int mt7925_radio_req_rec_n;
+
+struct mt7925_radio_ctx {
+	u16 active_links, valid_links;
+};
+
+static void
+mt7925_radio_ctx_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
+{
+	struct mt7925_radio_ctx *ctx = priv;
+
+	if (vif->type != NL80211_IFTYPE_STATION || !ieee80211_vif_is_mld(vif))
+		return;
+
+	ctx->active_links = vif->active_links;
+	ctx->valid_links = vif->valid_links;
+}
+
+static void
+mt7925_trace_radio_grant(struct mt792x_dev *dev, const char *tag,
+			 struct mt7925_roc_grant_tlv *grant)
+{
+	struct mt7925_radio_ctx ctx = {};
+	int req_link = -1, req_db = -1;
+	unsigned int i;
+
+	if (!(READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)))
+		return;
+
+	for (i = 0; i < ARRAY_SIZE(mt7925_radio_req_recs); i++) {
+		struct mt7925_radio_req_rec *r = &mt7925_radio_req_recs[i];
+
+		if (r->valid && r->token == grant->tokenid &&
+		    r->bss_idx == grant->bss_idx) {
+			req_link = r->link_id;
+			req_db = r->dbdcband;
+		}
+	}
+
+	ieee80211_iterate_active_interfaces_atomic(dev->mt76.hw,
+						   IEEE80211_IFACE_ITER_RESUME_ALL,
+						   mt7925_radio_ctx_iter, &ctx);
+
+	printk(KERN_INFO
+	       "MLO_RADIO_GRANT: tag=%s token=%u bss_idx=%u status=%u reqtype=%u granted_dbdcband=%u ch=%u rfband=%u rfsco=%u width=%u seg1=%u seg2=%u itv=%u req_link_id=%d req_dbdcband=%d active_links=0x%x valid_links=0x%x held_token=%u held_links=0x%x pending_token=%u pending_links=0x%x\n",
+	       tag, grant->tokenid, grant->bss_idx,
+	       grant->status, grant->reqtype, grant->dbdcband,
+	       grant->primarychannel, grant->rfband, grant->rfsco,
+	       grant->channelwidth, grant->centerfreqseg1, grant->centerfreqseg2,
+	       le32_to_cpu(grant->max_interval), req_link, req_db,
+	       ctx.active_links, ctx.valid_links,
+	       dev->phy.mlo_roc.held_token, dev->phy.mlo_roc.held_links,
+	       dev->phy.mlo_roc.pending_token, dev->phy.mlo_roc.pending_links);
 }
 
 static void
@@ -370,6 +448,7 @@ mt7925_mcu_roc_iter(void *priv, u8 *mac, struct ieee80211_vif *vif)
 	mvif->band_idx = grant->dbdcband;
 }
 
+
 static void mt7925_mcu_roc_handle_grant(struct mt792x_dev *dev,
 					struct tlv *tlv)
 {
@@ -382,6 +461,22 @@ static void mt7925_mcu_roc_handle_grant(struct mt792x_dev *dev,
 	/* should never happen */
 	WARN_ON_ONCE((le16_to_cpu(grant->tag) != UNI_EVENT_ROC_GRANT));
 
+	dev_info(dev->mt76.dev,
+		 "ROCEV GRANT bss=%u token=%u status=%u reqtype=%u dbdcband=%u ch=%u band=%u itv=%u\n",
+		 grant->bss_idx, grant->tokenid, grant->status, grant->reqtype,
+		 grant->dbdcband, grant->primarychannel, grant->rfband,
+		 le32_to_cpu(grant->max_interval));
+
+	mt7925_trace_radio_grant(dev, "grant", grant);
+
+	if (mt7927_mlo_radio_event(dev, grant, false))
+		return;
+
+	if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace))
+		printk(KERN_INFO "ROC_GRANT_RECEIVED: site=grant_handler token=%u reqtype=%u itv=%u\n",
+		       grant->tokenid, grant->reqtype,
+		       le32_to_cpu(grant->max_interval));
+
 	if (grant->reqtype == MT7925_ROC_REQ_ROC)
 		ieee80211_ready_on_channel(hw);
 	else if (grant->reqtype == MT7925_ROC_REQ_JOIN)
@@ -390,6 +485,8 @@ static void mt7925_mcu_roc_handle_grant(struct mt792x_dev *dev,
 						mt7925_mcu_roc_iter, grant);
 	dev->phy.roc_grant = true;
 	wake_up(&dev->phy.roc_wait);
+
+
 	duration = le32_to_cpu(grant->max_interval);
 	mod_timer(&dev->phy.roc_timer,
 		  jiffies + msecs_to_jiffies(duration));
@@ -438,26 +535,76 @@ mt7925_mcu_uni_hif_ctrl_event(struct mt792x_dev *dev, struct sk_buff *skb)
 	}
 }
 
+/* Standalone-SUB_LINK-ROC experiment (test_mt7927_sublink_roc):
+ * mt7925_set_sublink_roc()'s own wait_event_timeout() previously had no way
+ * to ever succeed -- this event (tag=4) was only logged, never tied to any
+ * completion state, so the caller always timed out after 1s regardless of
+ * what firmware actually did with the request. This handler wires it to
+ * dedicated, token-matched completion state (phy->sublink_roc_*), kept
+ * fully independent of the full-JOIN GRANT path's phy->roc_grant/roc_wait
+ * predicate so neither can satisfy the other's wait.
+ *
+ * Do not assume tag=4 alone means success: firmware's status byte is read
+ * and preserved for the caller to interpret, not inferred from the event's
+ * mere arrival.
+ */
+static void mt7925_mcu_roc_handle_grant_sub_link(struct mt792x_dev *dev,
+						 struct tlv *tlv)
+{
+	struct mt7925_roc_grant_tlv *grant;
+	u16 len = le16_to_cpu(tlv->len);
+
+	if (len < sizeof(*grant)) {
+		if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace))
+			printk(KERN_INFO
+			      "SUBLINK_ROC_EVENT_IGNORED: reason=short_tlv len=%u need=%zu\n",
+			      len, sizeof(*grant));
+		return;
+	}
+
+	grant = (struct mt7925_roc_grant_tlv *)tlv;
+
+	dev_info(dev->mt76.dev,
+		 "ROCEV SUB_LINK bss=%u token=%u status=%u reqtype=%u dbdcband=%u ch=%u band=%u itv=%u\n",
+		 grant->bss_idx, grant->tokenid, grant->status, grant->reqtype,
+		 grant->dbdcband, grant->primarychannel, grant->rfband,
+		 le32_to_cpu(grant->max_interval));
+
+	mt7925_trace_radio_grant(dev, "sub_link", grant);
+
+	mt7927_mlo_radio_event(dev, grant, true);
+}
+
 static void
 mt7925_mcu_uni_roc_event(struct mt792x_dev *dev, struct sk_buff *skb)
 {
 	struct tlv *tlv;
 	u32 tlv_len;
 
+	if (!pskb_may_pull(skb, sizeof(struct mt7925_mcu_rxd) + 4))
+		return;
 	skb_pull(skb, sizeof(struct mt7925_mcu_rxd) + 4);
 	tlv = (struct tlv *)skb->data;
 	tlv_len = skb->len;
 
 	mt7925_for_each_tlv(tlv, tlv_len) {
+		u16 len = le16_to_cpu(tlv->len);
+
+		if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) {
+			dev_info(dev->mt76.dev, "ROCEV tag=%u len=%u\n",
+				 le16_to_cpu(tlv->tag), len);
+			print_hex_dump(KERN_INFO, "MLO_FW_ROCEV_RAW: ",
+				       DUMP_PREFIX_OFFSET, 16, 1, tlv, len, false);
+		}
+
 		switch (le16_to_cpu(tlv->tag)) {
 		case UNI_EVENT_ROC_GRANT:
-			if (le16_to_cpu(tlv->len) <
-			    sizeof(struct mt7925_roc_grant_tlv))
-				break;
-
-			mt7925_mcu_roc_handle_grant(dev, tlv);
+			if (len >= sizeof(struct mt7925_roc_grant_tlv))
+				mt7925_mcu_roc_handle_grant(dev, tlv);
 			break;
 		case UNI_EVENT_ROC_GRANT_SUB_LINK:
+			if (len >= sizeof(struct mt7925_roc_grant_tlv))
+				mt7925_mcu_roc_handle_grant_sub_link(dev, tlv);
 			break;
 		}
 	}
@@ -543,6 +690,8 @@ mt7925_mcu_rssi_monitor_iter(void *priv, u8 *mac,
 
 	if (vif->type != NL80211_IFTYPE_STATION)
 		return;
+
+	mt7927_mlo_steering_rssi_event(vif, rssi);
 
 	if (!(vif->driver_flags & IEEE80211_VIF_SUPPORTS_CQM_RSSI))
 		return;
@@ -1069,20 +1218,6 @@ mt7925_mcu_parse_phy_cap(struct mt792x_dev *dev, char *data)
 	mdev->phy.cap.has_5ghz = cap->hw_path & BIT(WF0_5G);
 }
 
-static void
-mt7925_mcu_parse_eml_cap(struct mt792x_dev *dev, char *data)
-{
-	struct mt7925_mcu_eml_cap {
-		u8 rsv[4];
-		__le16 eml_cap;
-		u8 rsv2[6];
-	} __packed * cap;
-
-	cap = (struct mt7925_mcu_eml_cap *)data;
-
-	dev->phy.eml_cap = le16_to_cpu(cap->eml_cap);
-}
-
 static int
 mt7925_mcu_get_nic_capability(struct mt792x_dev *dev)
 {
@@ -1127,6 +1262,11 @@ mt7925_mcu_get_nic_capability(struct mt792x_dev *dev)
 		if (skb->len < len)
 			break;
 
+		/* Read-only visibility of the firmware's own capability report (tag, length, first bytes). */
+		if (is_mt7927(&dev->mt76))
+			print_hex_dump(KERN_INFO, "MT7927_NIC_CAP: ", DUMP_PREFIX_NONE, 32, 1,
+				       tlv, min_t(int, len, 24), false);
+
 		switch (le16_to_cpu(tlv->tag)) {
 		case MT_NIC_CAP_6G:
 			mphy->cap.has_6ghz = !!tlv->data[0];
@@ -1141,7 +1281,7 @@ mt7925_mcu_get_nic_capability(struct mt792x_dev *dev)
 			dev->phy.chip_cap = le64_to_cpu(*(__le64 *)tlv->data);
 			break;
 		case MT_NIC_CAP_EML_CAP:
-			mt7925_mcu_parse_eml_cap(dev, tlv->data);
+			mt7925_mlo_fw_cap_parse(dev, tlv->data, len - sizeof(*tlv));
 			break;
 		default:
 			break;
@@ -1429,6 +1569,7 @@ int mt7925_mcu_add_key(struct mt76_dev *dev, struct ieee80211_vif *vif,
 	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
 	struct mt792x_bss_conf *mconf = mt792x_vif_to_link(mvif, wcid->link_id);
 	struct sk_buff *skb;
+	u8 keyfp[SHA256_DIGEST_SIZE] = {};
 	int ret;
 
 	skb = __mt76_connac_mcu_alloc_sta_req(dev, &mconf->mt76, wcid,
@@ -1436,22 +1577,53 @@ int mt7925_mcu_add_key(struct mt76_dev *dev, struct ieee80211_vif *vif,
 	if (IS_ERR(skb))
 		return PTR_ERR(skb);
 
+	/* Diagnostic only: a 4-byte SHA-256 fingerprint (never key bytes) lets a
+	 * trace prove whether two installs of "the same PTK" really carry the
+	 * same key material.
+	 */
+	if ((READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) &&
+	    key->keylen <= 32)
+		sha256(key->key, key->keylen, keyfp);
+
 	ret = mt7925_mcu_sta_key_tlv(wcid, sta_key_conf, skb, key, cmd, msta);
 	if (ret) {
 		dev_kfree_skb(skb);
 		return ret;
 	}
 
-	return mt76_mcu_skb_send_msg(dev, skb, mcu_cmd, true);
+	if ((READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) && ieee80211_vif_is_mld(vif))
+		printk(KERN_INFO
+		       "MLO_KEY_MCU: stage=before_send cmd=%d mcu=0x%x sta=%u pairwise=%u keyidx=%d key_link=%d key_cipher=0x%x wcid=%px idx=%u link=%u bss=%u omac=%u band=%u hwkey=%d/%d wcid_cipher=%u len=%u keyfp=%02x%02x%02x%02x\n",
+		       cmd, mcu_cmd, msta != &mvif->sta,
+		       !!(key->flags & IEEE80211_KEY_FLAG_PAIRWISE),
+		       key->keyidx, key->link_id, key->cipher, wcid, wcid->idx,
+		       wcid->link_id, mconf ? mconf->mt76.idx : 0xff,
+		       mconf ? mconf->mt76.omac_idx : 0xff,
+		       mconf ? mconf->mt76.band_idx : 0xff,
+		       wcid->hw_key_idx, wcid->hw_key_idx2, wcid->cipher,
+		       skb->len, keyfp[0], keyfp[1], keyfp[2], keyfp[3]);
+
+	ret = mt76_mcu_skb_send_msg(dev, skb, mcu_cmd, true);
+
+	if ((READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) && ieee80211_vif_is_mld(vif))
+		printk(KERN_INFO
+		       "MLO_KEY_MCU: stage=after_send ret=%d cmd=%d sta=%u pairwise=%u keyidx=%d key_link=%d wcid=%px idx=%u link=%u bss=%u band=%u hwkey=%d/%d wcid_cipher=%u\n",
+		       ret, cmd, msta != &mvif->sta,
+		       !!(key->flags & IEEE80211_KEY_FLAG_PAIRWISE),
+		       key->keyidx, key->link_id, wcid, wcid->idx,
+		       wcid->link_id, mconf ? mconf->mt76.idx : 0xff,
+		       mconf ? mconf->mt76.band_idx : 0xff,
+		       wcid->hw_key_idx, wcid->hw_key_idx2, wcid->cipher);
+
+	return ret;
 }
+
 
 int mt7925_mcu_set_mlo_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 			   u16 sel_links, int duration, u8 token_id)
 {
-	struct mt792x_vif *mvif = mconf->vif;
-	struct ieee80211_vif *vif = container_of((void *)mvif,
-						 struct ieee80211_vif, drv_priv);
-	struct ieee80211_bss_conf *link_conf;
+	struct mt792x_vif *mvif;
+	struct ieee80211_vif *vif;
 	struct ieee80211_channel *chan;
 	const u8 ch_band[] = {
 		[NL80211_BAND_2GHZ] = 1,
@@ -1460,59 +1632,54 @@ int mt7925_mcu_set_mlo_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf
 	};
 	enum mt7925_roc_req type;
 	int center_ch, i = 0;
-	bool is_AG_band = false;
-	struct {
-		u8 id;
-		u8 bss_idx;
-		u16 tag;
-		struct mt792x_bss_conf *mconf;
-		struct ieee80211_channel *chan;
-	} links[2];
+	struct mt7927_mlo_radio_plan plan;
+	typeof(plan.link[0]) *links = plan.link;
 
 	struct {
 		struct {
 			u8 rsv[4];
 		} __packed hdr;
-		struct roc_acquire_tlv roc[2];
+		struct roc_acquire_tlv roc[3];
 	} __packed req = {
 			.roc[0].tag = cpu_to_le16(UNI_ROC_NUM),
 			.roc[0].len = cpu_to_le16(sizeof(struct roc_acquire_tlv)),
 			.roc[1].tag = cpu_to_le16(UNI_ROC_NUM),
-			.roc[1].len = cpu_to_le16(sizeof(struct roc_acquire_tlv))
+			.roc[1].len = cpu_to_le16(sizeof(struct roc_acquire_tlv)),
+			.roc[2].tag = cpu_to_le16(UNI_ROC_NUM),
+			.roc[2].len = cpu_to_le16(sizeof(struct roc_acquire_tlv))
 	};
+	/* TEST-ONLY (test_mt7927_mlo_join3, default N): a JOIN naming all three
+	 * links of an MT7927 MLD. Every other request keeps exactly two TLVs
+	 * and the original 52-byte wire format.
+	 */
+	unsigned int ntlv, resolved_links;
+	u8 anchor_link;
+	size_t req_len;
+	int ret;
 
-	struct wiphy *wiphy = phy->mt76->hw->wiphy;
+	ret = mt7927_mlo_radio_plan(phy, mconf, sel_links, &plan);
+	if (ret)
+		return ret;
+	mvif = mconf->vif;
+	vif = container_of((void *)mvif, struct ieee80211_vif, drv_priv);
+	ntlv = resolved_links = plan.count;
+	anchor_link = plan.anchor_link;
+	type = plan.reqtype;
 
-	if (!mconf || hweight16(vif->valid_links) < 2 ||
-	    hweight16(sel_links) != 2)
-		return -EPERM;
+	if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace))
+		printk(KERN_INFO "MLO_ROC_BUILD: sel_links=0x%x active_links=0x%x resolved_links=%u\n",
+		       sel_links, vif->active_links, resolved_links);
 
-	for (i = 0; i < ARRAY_SIZE(links); i++) {
-		links[i].id = i ? __ffs(~BIT(mconf->link_id) & sel_links) :
-				 mconf->link_id;
-		link_conf = mt792x_vif_to_bss_conf(vif, links[i].id);
-		if (WARN_ON_ONCE(!link_conf))
-			return -EPERM;
-
-		links[i].chan = link_conf->chanreq.oper.chan;
-		if (WARN_ON_ONCE(!links[i].chan))
-			return -EPERM;
-
-		links[i].mconf = mt792x_vif_to_link(mvif, links[i].id);
-		links[i].tag = links[i].id == mconf->link_id ?
-			       UNI_ROC_ACQUIRE : UNI_ROC_SUB_LINK;
-
-		is_AG_band |= links[i].chan->band == NL80211_BAND_2GHZ;
-	}
-
-	if (!(wiphy->iftype_ext_capab[0].mld_capa_and_ops &
-	      IEEE80211_MLD_CAP_OP_MAX_SIMUL_LINKS))
-		type = is_AG_band ? MT7925_ROC_REQ_MLSR_AG :
-				    MT7925_ROC_REQ_MLSR_AA;
-	else
-		type = MT7925_ROC_REQ_JOIN;
-
-	for (i = 0; i < ARRAY_SIZE(links) && i < hweight16(vif->active_links); i++) {
+	/* Populate a ROC TLV for every link actually being requested
+	 * (sel_links / links[]), not for however many links happen to be
+	 * active in vif->active_links right now. The caller in
+	 * mt7925_mac_set_links() invokes this before
+	 * ieee80211_set_active_links_async() updates vif->active_links, so
+	 * that count is still stale (1 bit) even though two links are being
+	 * requested here — using it as the fill bound left req.roc[1]
+	 * (UNI_ROC_SUB_LINK) zeroed and firmware never granted the JOIN.
+	 */
+	for (i = 0; i < ntlv && i < resolved_links; i++) {
 		if (WARN_ON_ONCE(!links[i].mconf || !links[i].chan))
 			continue;
 
@@ -1532,10 +1699,7 @@ int mt7925_mcu_set_mlo_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf
 		req.roc[i].center_chan2 = 0;
 		req.roc[i].center_chan2_from_ap = 0;
 
-		/* STR : 0xfe indicates BAND_ALL with enabling DBDC
-		 * EMLSR : 0xff indicates (BAND_AUTO) without DBDC
-		 */
-		req.roc[i].dbdcband = type == MT7925_ROC_REQ_JOIN ? 0xfe : 0xff;
+		req.roc[i].dbdcband = links[i].dbdcband;
 
 		if (chan->hw_value < center_ch)
 			req.roc[i].sco = 1; /* SCA */
@@ -1543,11 +1707,296 @@ int mt7925_mcu_set_mlo_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf
 			req.roc[i].sco = 3; /* SCB */
 
 		req.roc[i].band = ch_band[chan->band];
+
+		if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace))
+				printk(KERN_INFO "MLO_ROC_ENTRY: idx=%u link_id=%u reqtype=%u bss_idx=%u assigned_band=%u band=%u control_channel=%u bw=%u center_chan=%u dbdcband=%u token=%u\n",
+				       i, links[i].id, req.roc[i].reqtype,
+				       req.roc[i].bss_idx,
+				       links[i].mconf->mt76.band_idx, req.roc[i].band,
+				       req.roc[i].control_channel, req.roc[i].bw,
+				       req.roc[i].center_chan, req.roc[i].dbdcband,
+				       req.roc[i].tokenid);
+
+		{
+			struct mt7925_radio_req_rec *rec =
+				&mt7925_radio_req_recs[mt7925_radio_req_rec_n++ %
+						       ARRAY_SIZE(mt7925_radio_req_recs)];
+
+			rec->valid = true;
+			rec->token = req.roc[i].tokenid;
+			rec->bss_idx = req.roc[i].bss_idx;
+			rec->link_id = links[i].id;
+			rec->dbdcband = req.roc[i].dbdcband;
+		}
+
+		if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace))
+			printk(KERN_INFO
+			       "MLO_RADIO_REQ: token=%u reqtype=%u ntlv=%u ordinal=%u tag=%u link_id=%u bss_idx=%u ch=%u center=%u center2=%u band=%u bw=%u sco=%u req_dbdcband=0x%x pair_mask=0x%x anchor_link=%u active_links=0x%x valid_links=0x%x survivor_mask=0x%x held_token=%u held_links=0x%x pending_links=0x%x\n",
+			       req.roc[i].tokenid, req.roc[i].reqtype,
+			       resolved_links, i, le16_to_cpu(req.roc[i].tag),
+			       links[i].id, req.roc[i].bss_idx,
+			       req.roc[i].control_channel, req.roc[i].center_chan,
+			       req.roc[i].center_chan2, req.roc[i].band,
+			       req.roc[i].bw, req.roc[i].sco, req.roc[i].dbdcband,
+			       sel_links, anchor_link, vif->active_links,
+			       vif->valid_links,
+			       phy->mlo_roc.held_links & sel_links,
+			       phy->mlo_roc.held_token, phy->mlo_roc.held_links,
+			       phy->mlo_roc.pending_links);
+	}
+
+	req_len = sizeof(req.hdr) + ntlv * sizeof(struct roc_acquire_tlv);
+	if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) {
+		printk(KERN_INFO "MLO_FW_ROC_RAW: cmd=0x%x sel_links=0x%x len=%zu ntlv=%u\n",
+		       (unsigned int)MCU_UNI_CMD(ROC), sel_links, req_len, ntlv);
+		print_hex_dump(KERN_INFO, "MLO_FW_ROC_RAW: ", DUMP_PREFIX_OFFSET,
+			       16, 1, &req, req_len, false);
 	}
 
 	return mt76_mcu_send_msg(&mvif->phy->dev->mt76, MCU_UNI_CMD(ROC),
+				 &req, req_len, true);
+}
+
+/* TEST-ONLY (test_mt7927_mlo_roc_attach): one SUB_LINK-shaped TLV for the
+ * ADDED link only, carrying the HELD JOIN token. Every field is built the
+ * way mt7925_mcu_set_mlo_roc() builds the second (SUB_LINK) slot of a JOIN
+ * for the same pair, so it differs from that slot only by being sent alone
+ * under an already-held token; no ACQUIRE TLV is re-sent for the survivor.
+ */
+int mt7925_mcu_set_mlo_attach_roc(struct mt792x_phy *phy,
+				  struct mt792x_bss_conf *mconf, u16 sel_links,
+				  int duration, u8 token_id)
+{
+	struct mt792x_vif *mvif = mconf->vif;
+	struct ieee80211_vif *vif = container_of((void *)mvif,
+						 struct ieee80211_vif, drv_priv);
+	struct ieee80211_bss_conf *link_conf;
+	struct ieee80211_channel *chan;
+	const u8 ch_band[] = {
+		[NL80211_BAND_2GHZ] = 1,
+		[NL80211_BAND_5GHZ] = 2,
+		[NL80211_BAND_6GHZ] = 3,
+	};
+	enum mt7925_roc_req type;
+	bool is_AG_band = false;
+	unsigned int lid;
+	int center_ch;
+	struct {
+		struct {
+			u8 rsv[4];
+		} __packed hdr;
+		struct roc_acquire_tlv roc;
+	} __packed req = {};
+
+	link_conf = mt792x_vif_to_bss_conf(vif, mconf->link_id);
+	if (!link_conf || !link_conf->chanreq.oper.chan)
+		return -EPERM;
+	chan = link_conf->chanreq.oper.chan;
+
+	for_each_set_bit(lid, (unsigned long *)&sel_links,
+			 IEEE80211_MLD_MAX_NUM_LINKS) {
+		struct ieee80211_bss_conf *lc = mt792x_vif_to_bss_conf(vif, lid);
+
+		if (lc && lc->chanreq.oper.chan)
+			is_AG_band |= lc->chanreq.oper.chan->band ==
+				      NL80211_BAND_2GHZ;
+	}
+
+	type = mt7927_mlo_radio_reqtype(phy, is_AG_band, false);
+
+	center_ch = ieee80211_frequency_to_channel(chan->center_freq);
+	req.roc.tag = cpu_to_le16(UNI_ROC_SUB_LINK);
+	req.roc.len = cpu_to_le16(sizeof(struct roc_acquire_tlv));
+	req.roc.tokenid = token_id;
+	req.roc.reqtype = type;
+	req.roc.maxinterval = cpu_to_le32(duration);
+	req.roc.bss_idx = mconf->mt76.idx;
+	req.roc.control_channel = chan->hw_value;
+	req.roc.bw = CMD_CBW_20MHZ;
+	req.roc.bw_from_ap = CMD_CBW_20MHZ;
+	req.roc.center_chan = center_ch;
+	req.roc.center_chan_from_ap = center_ch;
+	req.roc.band = ch_band[chan->band];
+
+	req.roc.dbdcband = mt7927_mlo_radio_slot_dbdc(phy, mconf, chan,
+					type, is_AG_band, UNI_ROC_SUB_LINK, 1, false);
+
+	if (chan->hw_value < center_ch)
+		req.roc.sco = 1; /* SCA */
+	else if (chan->hw_value > center_ch)
+		req.roc.sco = 3; /* SCB */
+
+	if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) {
+		printk(KERN_INFO "MLO_ROC_ATTACH: token=%u link_id=%u bss_idx=%u tag=%u reqtype=%u dbdcband=0x%x band=%u ch=%u center=%u sel_links=0x%x\n",
+		       token_id, mconf->link_id, req.roc.bss_idx,
+		       le16_to_cpu(req.roc.tag), req.roc.reqtype,
+		       req.roc.dbdcband, req.roc.band, req.roc.control_channel,
+		       req.roc.center_chan, sel_links);
+		printk(KERN_INFO "MLO_FW_ROC_RAW: cmd=0x%x attach sel_links=0x%x len=%zu\n",
+		       (unsigned int)MCU_UNI_CMD(ROC), sel_links, sizeof(req));
+		print_hex_dump(KERN_INFO, "MLO_FW_ROC_RAW: ", DUMP_PREFIX_OFFSET,
+			       16, 1, &req, sizeof(req), false);
+	}
+
+	return mt76_mcu_send_msg(&phy->dev->mt76, MCU_UNI_CMD(ROC),
 				 &req, sizeof(req), true);
 }
+
+
+/* Delta acquisition: fresh-token, ONE-TLV UNI_ROC_ACQUIRE / reqtype JOIN
+ * request for a single (added) link while the survivor's JOIN slot stays
+ * held under its old token. Every field is built the way
+ * mt7925_mcu_set_mlo_roc() builds the same link's slot in a normal
+ * replacement JOIN (same bss, channel, band, bw, center, interval, reqtype
+ * selection). The differences: tag ACQUIRE instead of SUB_LINK, no survivor
+ * TLV, and dbdcband = the ACQUIRE sentinel (0xfe) when @dbdcband >= 0 (the
+ * caller's physical-slot value is not put on the wire; the caller only
+ * validates the slot the firmware grants).
+ * A negative @dbdcband keeps the legacy value derivation used by the
+ * test-only probe (test_mt7927_mlo_roc_single_acquire).
+ */
+int mt7925_mcu_set_mlo_single_acquire(struct mt792x_phy *phy,
+				      struct mt792x_bss_conf *mconf,
+				      u16 sel_links, int duration, u8 token_id,
+				      int dbdcband)
+{
+	struct mt792x_vif *mvif = mconf->vif;
+	struct ieee80211_vif *vif = container_of((void *)mvif,
+						 struct ieee80211_vif, drv_priv);
+	struct wiphy *wiphy = phy->mt76->hw->wiphy;
+	struct ieee80211_bss_conf *link_conf;
+	struct ieee80211_channel *chan;
+	const u8 ch_band[] = {
+		[NL80211_BAND_2GHZ] = 1,
+		[NL80211_BAND_5GHZ] = 2,
+		[NL80211_BAND_6GHZ] = 3,
+	};
+	enum mt7925_roc_req type;
+	bool is_AG_band = false;
+	unsigned int lid;
+	int center_ch;
+	u8 dbdc_sub, dbdc_acq;
+	int test_override = mt7927_mlo_radio_test_reqtype();
+	bool test_delta = dbdcband >= 0 && is_mt7927(&phy->dev->mt76);
+	struct {
+		struct {
+			u8 rsv[4];
+		} __packed hdr;
+		struct roc_acquire_tlv roc;
+	} __packed req = {};
+
+	link_conf = mt792x_vif_to_bss_conf(vif, mconf->link_id);
+	if (!link_conf || !link_conf->chanreq.oper.chan)
+		return -EPERM;
+	chan = link_conf->chanreq.oper.chan;
+
+	for_each_set_bit(lid, (unsigned long *)&sel_links,
+			 IEEE80211_MLD_MAX_NUM_LINKS) {
+		struct ieee80211_bss_conf *lc = mt792x_vif_to_bss_conf(vif, lid);
+
+		if (lc && lc->chanreq.oper.chan)
+			is_AG_band |= lc->chanreq.oper.chan->band ==
+				      NL80211_BAND_2GHZ;
+	}
+
+	type = mt7927_mlo_radio_reqtype(phy, is_AG_band, test_delta);
+
+	center_ch = ieee80211_frequency_to_channel(chan->center_freq);
+	req.roc.tag = cpu_to_le16(UNI_ROC_ACQUIRE);
+	req.roc.len = cpu_to_le16(sizeof(struct roc_acquire_tlv));
+	req.roc.tokenid = token_id;
+	req.roc.reqtype = type;
+	req.roc.maxinterval = cpu_to_le32(duration);
+	req.roc.bss_idx = mconf->mt76.idx;
+	req.roc.control_channel = chan->hw_value;
+	req.roc.bw = CMD_CBW_20MHZ;
+	req.roc.bw_from_ap = CMD_CBW_20MHZ;
+	req.roc.center_chan = center_ch;
+	req.roc.center_chan_from_ap = center_ch;
+	req.roc.band = ch_band[chan->band];
+
+	/* dbdcband: the delta ACQUIRE (@dbdcband >= 0 marks the delta caller)
+	 * asks for the firmware-selected sentinel the ACQUIRE tag uses in the
+	 * proven working JOIN (0xfe, see mt7927_mlo_join_roc_dbdcband()), not
+	 * an explicit slot index: the Windows host driver never sends an
+	 * explicit radio index for an MLO request, and an explicit 0/1 on a
+	 * 2.4GHz-containing JOIN was A/B-tested to get no grant. The physical
+	 * slot the firmware then reports in the grant is only an observation
+	 * that the caller validates, not part of this request.
+	 */
+	dbdc_sub = mt7927_mlo_join_roc_dbdcband(mconf, chan, UNI_ROC_SUB_LINK,
+						is_AG_band, mconf->link_id, 1);
+	dbdc_acq = mt7927_mlo_join_roc_dbdcband(mconf, chan, UNI_ROC_ACQUIRE,
+						is_AG_band, mconf->link_id, 0);
+	req.roc.dbdcband = mt7927_mlo_radio_slot_dbdc(phy, mconf, chan,
+			type, is_AG_band, dbdcband >= 0 ? UNI_ROC_ACQUIRE :
+			UNI_ROC_SUB_LINK, dbdcband >= 0 ? 0 : 1, dbdcband >= 0);
+
+	if (test_delta) {
+		int owner = mt7925_mlo_continuity_get(&phy->mlo_roc);
+		const struct mt7925_mlo_grant_inc *survivor =
+			owner >= 0 ? &phy->mlo_roc.grant[owner] : NULL;
+		u16 mld_cap = wiphy->iftype_ext_capab[0].mld_capa_and_ops;
+
+		pr_info("MLO_TEST_REQTYPE: override=%d actual=%u tag=%u token=%u bss=%u link=%u ch=%u rfband=%u dbdcband=0x%x held_token=%u held_bss=%u held_link=%u held_links=0x%x mld_cap=0x%04x max_simul_encoded=%u\n",
+			test_override, req.roc.reqtype,
+			le16_to_cpu(req.roc.tag), token_id, req.roc.bss_idx,
+			mconf->link_id, req.roc.control_channel, req.roc.band,
+			req.roc.dbdcband, survivor ? survivor->token : 0,
+			survivor ? survivor->bss_idx : 255,
+			survivor ? survivor->link_id : 255,
+			phy->mlo_roc.held_links, mld_cap,
+			u16_get_bits(mld_cap, IEEE80211_MLD_CAP_OP_MAX_SIMUL_LINKS));
+	}
+
+	if (chan->hw_value < center_ch)
+		req.roc.sco = 1; /* SCA */
+	else if (chan->hw_value > center_ch)
+		req.roc.sco = 3; /* SCB */
+
+	{
+		struct mt7925_radio_req_rec *rec =
+			&mt7925_radio_req_recs[mt7925_radio_req_rec_n++ %
+					       ARRAY_SIZE(mt7925_radio_req_recs)];
+
+		rec->valid = true;
+		rec->token = req.roc.tokenid;
+		rec->bss_idx = req.roc.bss_idx;
+		rec->link_id = mconf->link_id;
+		rec->dbdcband = req.roc.dbdcband;
+	}
+
+	if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace))
+		printk(KERN_INFO
+		       "MLO_RADIO_REQ: token=%u reqtype=%u ntlv=1 ordinal=0 tag=%u link_id=%u bss_idx=%u ch=%u center=%u center2=0 band=%u bw=%u sco=%u req_dbdcband=0x%x pair_mask=0x%x anchor_link=%u active_links=0x%x valid_links=0x%x survivor_mask=0x%x held_token=%u held_links=0x%x pending_links=0x%x delta=1\n",
+		       req.roc.tokenid, req.roc.reqtype,
+		       le16_to_cpu(req.roc.tag), mconf->link_id,
+		       req.roc.bss_idx, req.roc.control_channel,
+		       req.roc.center_chan, req.roc.band, req.roc.bw,
+		       req.roc.sco, req.roc.dbdcband, sel_links,
+		       mconf->link_id, vif->active_links, vif->valid_links,
+		       phy->mlo_roc.held_links & sel_links,
+		       phy->mlo_roc.held_token, phy->mlo_roc.held_links,
+		       phy->mlo_roc.pending_links);
+
+	printk(KERN_INFO "MLO_ROC_SINGLE_ACQ: token=%u tag=%u reqtype=%u link_id=%u bss_idx=%u band=%u ch=%u bw=%u center=%u center_from_ap=%u sco=%u dbdcband=0x%x (sub_link_value=0x%x acquire_value=0x%x) interval=%d sel_links=0x%x len=%zu\n",
+	       token_id, le16_to_cpu(req.roc.tag), req.roc.reqtype,
+	       mconf->link_id, req.roc.bss_idx, req.roc.band,
+	       req.roc.control_channel, req.roc.bw, req.roc.center_chan,
+	       req.roc.center_chan_from_ap, req.roc.sco, req.roc.dbdcband,
+	       dbdc_sub, dbdc_acq, duration, sel_links, sizeof(req));
+	printk(KERN_INFO "MLO_FW_ROC_RAW: cmd=0x%x single_acquire sel_links=0x%x len=%zu\n",
+	       (unsigned int)MCU_UNI_CMD(ROC), sel_links, sizeof(req));
+	print_hex_dump(KERN_INFO, "MLO_FW_ROC_RAW: ", DUMP_PREFIX_OFFSET,
+		       16, 1, &req, sizeof(req), false);
+
+	return mt76_mcu_send_msg(&phy->dev->mt76, MCU_UNI_CMD(ROC),
+				 &req, sizeof(req), true);
+}
+
+/* Test-only: consume events for the single-acquire probe token so they never
+ * reach the held/pending bookkeeping or wake the ordinary JOIN waiter.
+ */
 
 int mt7925_mcu_set_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 		       struct ieee80211_channel *chan, int duration,
@@ -1598,6 +2047,121 @@ int mt7925_mcu_set_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 				 &req, sizeof(req), true);
 }
 
+/* TEST-ONLY: single-TLV ROC using the never-wired MT7925_ROC_REQ_SUB_LINK
+ * reqtype, for a link joining an ALREADY-ACTIVE anchor on shared DBDC
+ * hardware. Unlike mt7925_mcu_set_mlo_roc()'s fixed 2-TLV JOIN command
+ * (which always re-requests the anchor too, and is proven to never grant
+ * once the STA is already associated), this asks firmware for only the
+ * arriving link's own band/channel, tagged UNI_ROC_SUB_LINK instead of
+ * UNI_ROC_ACQUIRE, with an explicit (not "auto") dbdcband matching the
+ * band-context resolver's already-assigned slot for this link. No prior
+ * artifact has ever exercised MT7925_ROC_REQ_SUB_LINK; this is the first
+ * live test of whether firmware accepts it at all.
+ */
+int mt7925_mcu_set_sublink_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
+			       struct ieee80211_channel *chan, u8 dbdcband,
+			       int duration, u8 token_id)
+{
+	int center_ch = ieee80211_frequency_to_channel(chan->center_freq);
+	struct mt792x_dev *dev = phy->dev;
+	struct {
+		struct {
+			u8 rsv[4];
+		} __packed hdr;
+		struct roc_acquire_tlv roc;
+	} __packed req = {
+		.roc = {
+			.tag = cpu_to_le16(UNI_ROC_SUB_LINK),
+			.len = cpu_to_le16(sizeof(struct roc_acquire_tlv)),
+			.tokenid = token_id,
+			.reqtype = MT7925_ROC_REQ_SUB_LINK,
+			.maxinterval = cpu_to_le32(duration),
+			.bss_idx = mconf->mt76.idx,
+			.control_channel = chan->hw_value,
+			.bw = CMD_CBW_20MHZ,
+			.bw_from_ap = CMD_CBW_20MHZ,
+			.center_chan = center_ch,
+			.center_chan_from_ap = center_ch,
+			.dbdcband = dbdcband,
+		},
+	};
+
+	if (chan->hw_value < center_ch)
+		req.roc.sco = 1; /* SCA */
+	else if (chan->hw_value > center_ch)
+		req.roc.sco = 3; /* SCB */
+
+	switch (chan->band) {
+	case NL80211_BAND_6GHZ:
+		req.roc.band = 3;
+		break;
+	case NL80211_BAND_5GHZ:
+		req.roc.band = 2;
+		break;
+	default:
+		req.roc.band = 1;
+		break;
+	}
+
+	printk(KERN_INFO
+	      "SUBLINK_ROC_TEST: TX bss_idx=%u dbdcband=%u band=%u ch=%u center=%u token=%u reqtype=%u tag=%u\n",
+	      req.roc.bss_idx, dbdcband, req.roc.band, req.roc.control_channel,
+	      center_ch, token_id, MT7925_ROC_REQ_SUB_LINK, UNI_ROC_SUB_LINK);
+
+	return mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(ROC),
+				 &req, sizeof(req), true);
+}
+
+/* Release an MLO JOIN reservation using BAND_ALL, matching the JOIN request.
+ * The generic 0xff ("auto") abort used for plain ROC does not work here.
+ */
+int mt7925_mcu_abort_mlo_roc(struct mt792x_phy *phy,
+			     struct mt792x_bss_conf *mconf, u8 token_id)
+{
+	struct mt792x_dev *dev = phy->dev;
+	struct {
+		struct {
+			u8 rsv[4];
+		} __packed hdr;
+		struct roc_abort_tlv {
+			__le16 tag;
+			__le16 len;
+			u8 bss_idx;
+			u8 tokenid;
+			u8 dbdcband;
+			u8 rsv[5];
+		} __packed abort;
+	} __packed req = {
+		.abort = {
+			.tag = cpu_to_le16(UNI_ROC_ABORT),
+			.len = cpu_to_le16(sizeof(struct roc_abort_tlv)),
+			.tokenid = token_id,
+			.bss_idx = mconf->mt76.idx,
+			.dbdcband = 0xfe,
+		},
+	};
+
+	if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace))
+		printk(KERN_INFO
+		       "ROC_ABORT_REQ: site=abort_mlo_roc link_id=%u bss_idx=%u token=%u mlo_links=0x%x band_idx=%u dbdcband=%u\n",
+		       mconf->link_id, mconf->mt76.idx, token_id,
+		       phy->mlo_roc.pending_links, mconf->mt76.band_idx,
+		       req.abort.dbdcband);
+
+	if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace))
+		printk(KERN_INFO
+		       "MLO_RADIO_ABORT: kind=mlo token=%u bss_idx=%u link_id=%u dbdcband=0x%x band_idx=%u reason=%pS held_token=%u held_links=0x%x pending_links=0x%x link_held=%d\n",
+		       token_id, mconf->mt76.idx, mconf->link_id,
+		       req.abort.dbdcband, mconf->mt76.band_idx,
+		       __builtin_return_address(0), phy->mlo_roc.held_token,
+		       phy->mlo_roc.held_links,
+		       phy->mlo_roc.pending_links,
+		       !!(phy->mlo_roc.held_links & BIT(mconf->link_id & 0xf)));
+
+	return mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(ROC),
+				 &req, sizeof(req), true);
+}
+
 int mt7925_mcu_abort_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 			 u8 token_id)
 {
@@ -1623,6 +2187,14 @@ int mt7925_mcu_abort_roc(struct mt792x_phy *phy, struct mt792x_bss_conf *mconf,
 			.dbdcband = 0xff, /* auto*/
 		},
 	};
+
+	if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace))
+		printk(KERN_INFO
+		       "MLO_RADIO_ABORT: kind=generic token=%u bss_idx=%u link_id=%u dbdcband=0x%x band_idx=%u reason=%pS held_token=%u held_links=0x%x pending_links=0x%x\n",
+		       token_id, mconf->mt76.idx, mconf->link_id,
+		       req.abort.dbdcband, mconf->mt76.band_idx,
+		       __builtin_return_address(0), phy->mlo_roc.held_token,
+		       phy->mlo_roc.held_links, phy->mlo_roc.pending_links);
 
 	return mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(ROC),
 				 &req, sizeof(req), true);
@@ -1793,7 +2365,7 @@ mt7925_mcu_sta_he_tlv(struct sk_buff *skb, struct ieee80211_link_sta *link_sta)
 	if (!link_sta->he_cap.has_he)
 		return;
 
-	mt76_connac_mcu_sta_he_tlv_v2(skb, link_sta->sta);
+	mt76_connac_mcu_sta_he_tlv_v2(skb, link_sta);
 }
 
 static void
@@ -1967,6 +2539,17 @@ mt7925_mcu_sta_phy_tlv(struct sk_buff *skb,
 	phy->ampdu = FIELD_PREP(IEEE80211_HT_AMPDU_PARM_FACTOR, af) |
 		     FIELD_PREP(IEEE80211_HT_AMPDU_PARM_DENSITY, mm);
 	phy->max_ampdu_len = af;
+
+	if ((READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) && ieee80211_vif_is_mld(vif))
+		printk(KERN_INFO
+		       "MLO_FW_STA_PHY: link_id=%u bss_idx=%u assigned_band=%u chan_band=%u control_channel=%u freq=%d width=%u phy_type=0x%x basic_rate=0x%x ampdu=0x%x max_ampdu=%u ht=%u vht=%u he=%u eht=%u he6=%u\n",
+		       link_sta->link_id, mconf->mt76.idx, mconf->mt76.band_idx,
+		       chandef->chan->band, chandef->chan->hw_value,
+		       chandef->chan->center_freq, chandef->width,
+		       phy->phy_type, le16_to_cpu(phy->basic_rate), phy->ampdu,
+		       phy->max_ampdu_len, link_sta->ht_cap.ht_supported,
+		       link_sta->vht_cap.vht_supported, link_sta->he_cap.has_he,
+		       link_sta->eht_cap.has_eht, !!link_sta->he_6ghz_capa.capa);
 }
 
 static void
@@ -2044,123 +2627,6 @@ mt7925_mcu_sta_rate_ctrl_tlv(struct sk_buff *skb,
 		       HT_MCS_MASK_NUM);
 }
 
-static void
-mt7925_mcu_sta_eht_mld_tlv(struct sk_buff *skb,
-			   struct ieee80211_vif *vif, struct ieee80211_sta *sta)
-{
-	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
-	struct wiphy *wiphy = mvif->phy->mt76->hw->wiphy;
-	const struct wiphy_iftype_ext_capab *ext_capa;
-	struct sta_rec_eht_mld *eht_mld;
-	struct tlv *tlv;
-	u16 eml_cap;
-
-	if (!ieee80211_vif_is_mld(vif))
-		return;
-
-	tlv = mt76_connac_mcu_add_tlv(skb, STA_REC_EHT_MLD, sizeof(*eht_mld));
-	eht_mld = (struct sta_rec_eht_mld *)tlv;
-	eht_mld->mld_type = 0xff;
-
-	ext_capa = cfg80211_get_iftype_ext_capa(wiphy,
-						ieee80211_vif_type_p2p(vif));
-	if (!ext_capa)
-		return;
-
-	eml_cap = (vif->cfg.eml_cap & (IEEE80211_EML_CAP_EMLSR_SUPP |
-				       IEEE80211_EML_CAP_TRANSITION_TIMEOUT)) |
-		  (ext_capa->eml_capabilities & (IEEE80211_EML_CAP_EML_PADDING_DELAY |
-						IEEE80211_EML_CAP_EML_TRANSITION_DELAY));
-
-	if (eml_cap & IEEE80211_EML_CAP_EMLSR_SUPP) {
-		eht_mld->eml_cap[0] = u16_get_bits(eml_cap, GENMASK(7, 0));
-		eht_mld->eml_cap[1] = u16_get_bits(eml_cap, GENMASK(15, 8));
-	} else {
-		eht_mld->str_cap[0] = BIT(1);
-	}
-}
-
-static void
-mt7925_mcu_sta_mld_tlv(struct sk_buff *skb,
-		       struct ieee80211_vif *vif,
-		       struct ieee80211_sta *sta,
-		       struct mt792x_bss_conf *mconf,
-		       struct mt792x_link_sta *mlink,
-		       struct mt792x_link_sta *pending)
-{
-	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
-	struct mt792x_sta *msta = (struct mt792x_sta *)sta->drv_priv;
-	struct mt792x_dev *dev = mvif->phy->dev;
-	unsigned long valid = msta->valid_links;
-	struct mt792x_bss_conf *mconf_pri;
-	struct sta_rec_mld *mld;
-	unsigned int link_id;
-	struct tlv *tlv;
-	u8 max_links;
-	u8 cnt = 0;
-
-	/* Primary link always uses driver's deflink WCID. */
-	mconf_pri = (msta->deflink_id != IEEE80211_LINK_UNSPECIFIED) ?
-		    mt792x_vif_to_link(mvif, msta->deflink_id) : NULL;
-
-	/* If caller is operating on deflink, reuse its mconf as primary. */
-	if (!mconf_pri && mlink == &msta->deflink)
-		mconf_pri = mconf;
-
-	if (!mconf_pri) {
-		dev_warn_ratelimited(dev->mt76.dev,
-				     "mt7925: MLD_TLV_LINK skip (no primary mconf) sta=%pM\n",
-			sta->addr);
-		return;
-	}
-
-	tlv = mt76_connac_mcu_add_tlv(skb, STA_REC_MLD, sizeof(*mld));
-	mld = (struct sta_rec_mld *)tlv;
-	memcpy(mld->mac_addr, sta->addr, ETH_ALEN);
-
-	mld->primary_id = cpu_to_le16(msta->deflink.wcid.idx);
-	mld->wlan_id = cpu_to_le16(msta->deflink.wcid.idx);
-
-	/* Always encode primary link first. */
-	mld->link[cnt].wlan_id = cpu_to_le16(msta->deflink.wcid.idx);
-	mld->link[cnt++].bss_idx = mconf_pri->mt76.idx;
-
-	max_links = ARRAY_SIZE(mld->link);
-
-	/* A link being added is not set in msta->valid_links yet */
-	if (pending && pending != &msta->deflink)
-		valid |= BIT(pending->wcid.link_id);
-
-	for_each_set_bit(link_id, &valid, IEEE80211_MLD_MAX_NUM_LINKS) {
-		struct mt792x_link_sta *mlink_sec;
-		struct mt792x_bss_conf *mconf_sec;
-
-		if (cnt == max_links)
-			break;
-
-		if (link_id == msta->deflink_id)
-			continue;
-
-		mlink_sec = mt792x_sta_to_link(msta, link_id);
-		if (!mlink_sec && pending && link_id == pending->wcid.link_id)
-			mlink_sec = pending;
-		if (!mlink_sec || mlink_sec == &msta->deflink)
-			continue;
-
-		mconf_sec = rcu_dereference_protected(mvif->link_conf[link_id],
-						      lockdep_is_held(&dev->mt76.mutex));
-		if (!mconf_sec)
-			continue;
-
-		if (cnt == 1)
-			mld->secondary_id = cpu_to_le16(mlink_sec->wcid.idx);
-
-		mld->link[cnt].wlan_id = cpu_to_le16(mlink_sec->wcid.idx);
-		mld->link[cnt++].bss_idx = mconf_sec->mt76.idx;
-	}
-
-	mld->link_num = cnt;
-}
 
 static void
 mt7925_mcu_sta_remove_tlv(struct sk_buff *skb)
@@ -2173,10 +2639,11 @@ mt7925_mcu_sta_remove_tlv(struct sk_buff *skb)
 	rem->action = 0;
 }
 
+
 static int
 mt7925_mcu_sta_cmd(struct mt76_phy *phy,
-		   struct mt76_sta_cmd_info *info,
-		   struct mt792x_link_sta *pending)
+			   struct mt76_sta_cmd_info *info,
+			   struct mt792x_link_sta *pending)
 {
 	struct mt792x_vif *mvif = (struct mt792x_vif *)info->vif->drv_priv;
 	struct mt76_dev *dev = phy->dev;
@@ -2184,6 +2651,7 @@ mt7925_mcu_sta_cmd(struct mt76_phy *phy,
 	struct mt792x_link_sta *mlink;
 	struct sk_buff *skb;
 	int conn_state;
+	int err;
 
 	mconf = mt792x_vif_to_link(mvif, info->wcid->link_id);
 	mlink = container_of(info->wcid, struct mt792x_link_sta, wcid);
@@ -2215,9 +2683,13 @@ mt7925_mcu_sta_cmd(struct mt76_phy *phy,
 					    info->state);
 
 		if (info->state != MT76_STA_INFO_STATE_NONE) {
-			mt7925_mcu_sta_mld_tlv(skb, info->vif,
-					       info->link_sta->sta,
-					       mconf, mlink, pending);
+			err = mt7925_mcu_sta_mld_tlv(skb, info->vif,
+						    info->link_sta->sta,
+						    mconf, mlink, pending);
+			if (err) {
+				dev_kfree_skb(skb);
+				return err;
+			}
 
 			mt7925_mcu_sta_eht_mld_tlv(skb, info->vif, info->link_sta->sta);
 		}
@@ -2225,8 +2697,24 @@ mt7925_mcu_sta_cmd(struct mt76_phy *phy,
 
 	if (!info->enable) {
 		mt7925_mcu_sta_remove_tlv(skb);
-		mt76_connac_mcu_add_tlv(skb, STA_REC_MLD_OFF,
-					sizeof(struct tlv));
+
+		/* STA_REC_MLD_OFF is a real MediaTek MCU tag (0x23). This
+		 * STA_REC_UPDATE command already targets one specific link's
+		 * own (bss_idx, wcid) pair, but live trace + 2 other disproven
+		 * theories in this session showed firmware killing real TX
+		 * airtime for an unrelated SIBLING link of the same MLD peer
+		 * immediately after removing just one of its links, with the
+		 * sibling's own WCID/key/BSS state provably unchanged. Only
+		 * send this "turn MLD off" tag when no other link of this
+		 * peer remains -- msta->valid_links is already updated to
+		 * exclude the link being removed by the time this runs
+		 * (mt7925_mac_sta_remove_links(), main.c), so a nonzero value
+		 * here means siblings are still live and this peer's MLD
+		 * context as a whole should stay on.
+		 */
+		if (mt7927_mlo_peer_remove_mld(phy, info, mlink))
+			mt76_connac_mcu_add_tlv(skb, STA_REC_MLD_OFF,
+						sizeof(struct tlv));
 	} else {
 		if (!info->link_sta)
 			mlink = &mvif->sta.deflink;
@@ -2234,23 +2722,50 @@ mt7925_mcu_sta_cmd(struct mt76_phy *phy,
 		mt7925_mcu_sta_hdr_trans_tlv(skb, info->vif, mlink);
 	}
 
-	return mt76_mcu_skb_send_msg(dev, skb, info->cmd, true);
+	if ((READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) && ieee80211_vif_is_mld(info->vif)) {
+		printk(KERN_INFO
+		       "MLO_FW_STA_RAW: cmd=0x%x link_id=%u bss_idx=%u assigned_band=%u phy_idx=%u wcid=%u enable=%u state=%u newly=%u len=%u\n",
+		       info->cmd, info->wcid->link_id, mconf->mt76.idx,
+		       mconf->mt76.band_idx, info->wcid->phy_idx, info->wcid->idx,
+		       info->enable, info->state, info->newly, skb->len);
+		print_hex_dump(KERN_INFO, "MLO_FW_STA_RAW: ", DUMP_PREFIX_OFFSET,
+			       16, 1, skb->data, skb->len, false);
+	}
+
+	{
+		int sta_ret = mt76_mcu_skb_send_msg(dev, skb, info->cmd, true);
+
+		if ((READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) &&
+		    ieee80211_vif_is_mld(info->vif))
+			printk(KERN_INFO
+			       "MLO_FW_STA_RET: cmd=0x%x link_id=%u bss_idx=%u wcid=%u enable=%u state=%u newly=%u ret=%d\n",
+			       info->cmd, info->wcid->link_id, mconf->mt76.idx,
+			       info->wcid->idx, info->enable, info->state,
+			       info->newly, sta_ret);
+		return sta_ret;
+	}
 }
 
-int mt7925_mcu_sta_update(struct mt792x_dev *dev,
-			  struct ieee80211_link_sta *link_sta,
-			  struct ieee80211_vif *vif,
-			  struct mt792x_link_sta *mlink,
-			  bool enable,
-			  enum mt76_sta_info_state state,
-			  struct mt792x_link_sta *pending)
+static int
+mt7925_mcu_sta_update_ex(struct mt792x_dev *dev,
+			 struct ieee80211_link_sta *link_sta,
+			 struct ieee80211_vif *vif,
+			 struct mt792x_link_sta *mlink,
+				 bool enable,
+				 enum mt76_sta_info_state state,
+				 bool force_newly,
+				 struct mt792x_link_sta *pending)
 {
 	struct mt792x_vif *mvif = (struct mt792x_vif *)vif->drv_priv;
-	int rssi = -ewma_rssi_read(&mvif->bss_conf.rssi);
+	struct ieee80211_bss_conf *link_conf =
+		mt792x_vif_to_bss_conf(vif, mlink->wcid.link_id);
+	struct mt792x_bss_conf *mconf =
+		mt792x_vif_to_link(mvif, mlink->wcid.link_id);
+	int rssi = -ewma_rssi_read(mconf ? &mconf->rssi : &mvif->bss_conf.rssi);
 	struct mt76_sta_cmd_info info = {
 		.link_sta = link_sta,
 		.vif = vif,
-		.link_conf = &vif->bss_conf,
+		.link_conf = link_conf ? link_conf : &vif->bss_conf,
 		.enable = enable,
 		.cmd = MCU_UNI_CMD(STA_REC_UPDATE),
 		.state = state,
@@ -2259,9 +2774,60 @@ int mt7925_mcu_sta_update(struct mt792x_dev *dev,
 	};
 
 	info.wcid = &mlink->wcid;
-	info.newly = state != MT76_STA_INFO_STATE_ASSOC;
+	info.newly = force_newly || state != MT76_STA_INFO_STATE_ASSOC;
 
 	return mt7925_mcu_sta_cmd(&dev->mphy, &info, pending);
+}
+
+/* Add-time membership is serialized synchronously before msta->link[] is
+ * published: a link being added is passed as @pending and is never retained.
+ */
+int mt7925_mcu_sta_update(struct mt792x_dev *dev,
+			  struct ieee80211_link_sta *link_sta,
+			  struct ieee80211_vif *vif,
+			  struct mt792x_link_sta *mlink,
+			  bool enable,
+			  enum mt76_sta_info_state state,
+			  struct mt792x_link_sta *pending)
+{
+	return mt7925_mcu_sta_update_ex(dev, link_sta, vif, mlink, enable,
+					state, false, pending);
+}
+
+/* A resident/active link's WTBL peer entry can be migrated to a different
+ * physical radio (band_idx) mid-association when MT7927's steering logic
+ * hands the peer's original radio over to a newly-admitted substitute link
+ * (see mt7927_mlo_reassign_band() / mt7927_mlo_refresh_reassigned_sta() in
+ * mt7927_mlo.c). Live trace proved that reprogramming such a peer with
+ * ordinary STATE_ASSOC "update" semantics (newly=0) leaves firmware's RX-side
+ * WLAN_IDX/WTBL binding for that peer stuck on the old radio: TX keeps
+ * working (driver-programmed TXWI does not depend on it), but every RX frame
+ * firmware receives for that peer on the new radio reports the invalid
+ * sentinel WLAN_IDX (4095) forever, i.e. the connection dies silently right
+ * at the moment of migration. Forcing newly=1 here makes firmware treat this
+ * as a full STA_REC (re)bind on the target radio, which is required for its
+ * RX attribution table to be rebuilt on that radio. This helper performs
+ * only the working fresh-peer creation phase (STATE_NONE,newly=1). The
+ * migration orchestrator restores keys and then calls
+ * mt7925_mcu_sta_authorize() so its terminal firmware operation matches the
+ * fresh-peer admission phase (STATE_ASSOC,newly=0).
+ */
+int mt7925_mcu_sta_rebind_phy(struct mt792x_dev *dev,
+			      struct ieee80211_link_sta *link_sta,
+			      struct ieee80211_vif *vif,
+			      struct mt792x_link_sta *mlink)
+{
+	return mt7925_mcu_sta_update_ex(dev, link_sta, vif, mlink, true,
+						MT76_STA_INFO_STATE_NONE, true, NULL);
+}
+
+int mt7925_mcu_sta_authorize(struct mt792x_dev *dev,
+			     struct ieee80211_link_sta *link_sta,
+			     struct ieee80211_vif *vif,
+			     struct mt792x_link_sta *mlink)
+{
+	return mt7925_mcu_sta_update_ex(dev, link_sta, vif, mlink, true,
+						MT76_STA_INFO_STATE_ASSOC, false, NULL);
 }
 
 int mt7925_mcu_set_beacon_filter(struct mt792x_dev *dev,
@@ -2603,6 +3169,19 @@ void mt7925_mcu_bss_rlm_tlv(struct sk_buff *skb, struct mt76_phy *phy,
 		req->sco = 1; /* SCA */
 	else if (req->control_channel > req->center_chan)
 		req->sco = 3; /* SCB */
+
+	if ((READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) &&
+	    ieee80211_vif_is_mld(link_conf->vif)) {
+		struct mt792x_bss_conf *mconf = mt792x_link_conf_to_mconf(link_conf);
+
+		printk(KERN_INFO
+		       "MLO_FW_BSS_RLM: link_id=%u bss_idx=%u assigned_band=%u chan_band=%u control_channel=%u freq=%d width=%u center1=%d center_chan=%u center2=%d center_chan2=%u tx_streams=%u rx_streams=%u rlm_band=%u sco=%u\n",
+		       link_conf->link_id, mconf->mt76.idx, mconf->mt76.band_idx,
+		       band, req->control_channel, chandef->chan->center_freq,
+		       chandef->width, freq1, req->center_chan, freq2,
+		       req->center_chan2, req->tx_streams, req->rx_streams,
+		       req->band, req->sco);
+	}
 }
 
 static struct sk_buff *
@@ -2839,6 +3418,18 @@ mt7925_mcu_bss_basic_tlv(struct sk_buff *skb,
 		WARN_ON(1);
 		break;
 	}
+
+	if ((READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) && ieee80211_vif_is_mld(vif))
+		printk(KERN_INFO
+		       "MLO_FW_BSS_BASIC: link_id=%u bss_idx=%u assigned_band=%u chan_band=%u control_channel=%u freq=%d width=%u omac=%u wmm=%u active=%u conn_state=%u sta=%u bmc=%u hw_bss=%u phy_mode=0x%x phy_ext=0x%x\n",
+		       link_conf->link_id, mconf->mt76.idx, mconf->mt76.band_idx,
+		       band, chandef->chan->hw_value, chandef->chan->center_freq,
+		       chandef->width, basic_req->omac_idx, basic_req->wmm_idx,
+		       basic_req->active, basic_req->conn_state,
+		       le16_to_cpu(basic_req->sta_idx),
+		       le16_to_cpu(basic_req->bmc_tx_wlan_idx),
+		       basic_req->hw_bss_idx, basic_req->phymode,
+		       basic_req->phymode_ext);
 }
 
 static void
@@ -2951,7 +3542,18 @@ mt7925_mcu_bss_mld_tlv(struct sk_buff *skb,
 			  !!(link_conf->vif->cfg.eml_cap &
 			     IEEE80211_EML_CAP_EMLSR_SUPP);
 
+	if (READ_ONCE(mt7925_test_force_str_no_eml))
+		mld->eml_enable = 0;
+
 	memcpy(mld->mac_addr, vif->addr, ETH_ALEN);
+
+	if (READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace))
+		printk(KERN_INFO
+		       "MLO_FW_BSS_MLD: link_id=%u bss_idx=%u group_mld=%u own_mld=%u remap=%u eml=%u omac=%u band=%u mac=%pM\n",
+		       mld->link_id, mconf->mt76.idx, mld->group_mld_id,
+		       mld->own_mld_id, mld->remap_idx, mld->eml_enable,
+		       mconf->mt76.omac_idx, mconf->mt76.band_idx,
+		       mld->mac_addr);
 }
 
 static void
@@ -3156,6 +3758,17 @@ int mt7925_mcu_add_bss_info_sta(struct mt792x_phy *phy,
 		mt7925_mcu_bss_mbssid_tlv(skb, link_conf, enable);
 	}
 
+	if ((READ_ONCE(mt76_mlo_diag_trace) || READ_ONCE(mt7925_mlo_ctl_trace)) && ieee80211_vif_is_mld(link_conf->vif)) {
+		printk(KERN_INFO
+		       "MLO_FW_BSS_RAW: cmd=0x%x link_id=%u bss_idx=%u band_idx=%u omac_idx=%u wmm_idx=%u sta_wlan=%u bmc_wlan=%u enable=%u len=%u\n",
+		       (unsigned int)MCU_UNI_CMD(BSS_INFO_UPDATE), link_conf->link_id,
+		       mconf->mt76.idx, mconf->mt76.band_idx,
+		       mconf->mt76.omac_idx, mconf->mt76.wmm_idx,
+		       sta_wlan_idx, bmc_tx_wlan_idx, enable, skb->len);
+		print_hex_dump(KERN_INFO, "MLO_FW_BSS_RAW: ", DUMP_PREFIX_OFFSET,
+			       16, 1, skb->data, skb->len, false);
+	}
+
 	err = mt76_mcu_skb_send_msg(&dev->mt76, skb,
 				    MCU_UNI_CMD(BSS_INFO_UPDATE), true);
 	return mt76_connac_mcu_bss_deact_err(&dev->mt76, err, enable);
@@ -3181,7 +3794,7 @@ int mt7925_mcu_add_bss_info(struct mt792x_phy *phy,
 		if (WARN_ON(!mlink))
 			return -EINVAL;
 	} else {
-		mlink = &mconf->vif->sta.deflink;
+		mlink = mlink_bc;
 	}
 
 	return mt7925_mcu_add_bss_info_sta(phy, ctx, link_conf, link_sta,
@@ -4226,6 +4839,56 @@ int mt7925_mcu_set_rssimonitor(struct mt792x_dev *dev, struct ieee80211_vif *vif
 		.enable = vif->cfg.assoc,
 		.cqm_rssi_high = (s8)(vif->bss_conf.cqm_rssi_thold + vif->bss_conf.cqm_rssi_hyst),
 		.cqm_rssi_low = (s8)(vif->bss_conf.cqm_rssi_thold - vif->bss_conf.cqm_rssi_hyst),
+	};
+
+	return mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(RSSI_MONITOR), &req,
+				 sizeof(req), false);
+}
+
+/* Internal MLO-steering variant of mt7925_mcu_set_rssimonitor(): armed
+ * directly by the driver (mt7925_mlo_steer_work(), main.c), not by cfg80211
+ * CQM, and against a specific link's own bss_conf -- never vif->bss_conf,
+ * which only ever resolves the primary/deflink and would make it
+ * impossible to sample any other link's RSSI. Since only one link's
+ * monitor can be armed at a time (the event carries no bss/link
+ * identifier), the caller is responsible for tracking which link_conf it
+ * last armed (mvif->mlo_rssi_monitor_link_id) and rotating through the
+ * others. Uses its own fixed threshold/hysteresis, not
+ * vif->bss_conf.cqm_rssi_* (mac80211-owned, only ever set by a userspace
+ * CQM request) -- tight hysteresis so real RSSI movement keeps
+ * re-triggering the event during each link's dwell time. Same request
+ * layout and MCU_UNI_CMD(RSSI_MONITOR)/UNI_CMD_RSSI_MONITOR_SET as
+ * mt7925_mcu_set_rssimonitor() above -- intentionally not merged with it
+ * so the userspace CQM path stays untouched.
+ */
+#define MT7925_MLO_RSSI_MONITOR_THOLD	-70
+#define MT7925_MLO_RSSI_MONITOR_HYST	3
+
+int mt7925_mcu_set_mlo_rssi_monitor(struct mt792x_dev *dev,
+				    struct ieee80211_bss_conf *link_conf,
+				    bool enable)
+{
+	struct mt792x_bss_conf *mconf = mt792x_link_conf_to_mconf(link_conf);
+	struct {
+		struct {
+			u8 bss_idx;
+			u8 pad[3];
+		} __packed hdr;
+		__le16 tag;
+		__le16 len;
+		u8 enable;
+		s8 cqm_rssi_high;
+		s8 cqm_rssi_low;
+		u8 rsv;
+	} req = {
+		.hdr = {
+			.bss_idx = mconf->mt76.idx,
+		},
+		.tag = cpu_to_le16(UNI_CMD_RSSI_MONITOR_SET),
+		.len = cpu_to_le16(sizeof(req) - 4),
+		.enable = enable,
+		.cqm_rssi_high = MT7925_MLO_RSSI_MONITOR_THOLD + MT7925_MLO_RSSI_MONITOR_HYST,
+		.cqm_rssi_low = MT7925_MLO_RSSI_MONITOR_THOLD - MT7925_MLO_RSSI_MONITOR_HYST,
 	};
 
 	return mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(RSSI_MONITOR), &req,

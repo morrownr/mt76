@@ -7,6 +7,7 @@
 
 #include "mt792x.h"
 #include "dma.h"
+#include "trace.h"
 
 /* timer_container_of was renamed from from_timer in kernel 6.16. */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)
@@ -188,6 +189,24 @@ static int mt792x_setup_iface_combinations(struct mt792x_dev *dev,
 #endif
 }
 
+static struct mt792x_link_sta *
+mt792x_mlo_tx_link(struct ieee80211_vif *vif, struct mt792x_sta *sta,
+		   u8 link_id)
+{
+	/* Frames injected through a monitor interface (and the MT7921/MT7922
+	 * driver, which shares this TX path) can carry a mac80211 STA whose
+	 * driver-private msta->vif was never set. mt792x_sta_to_link() derives
+	 * the vif from it and oopsed on the NULL (2026-10-11 09:23).
+	 */
+	if (!sta->vif) {
+		pr_warn_ratelimited("mt792x: TX with sta->vif unset (link_id=%u vif=%p comm=%s pid=%d); using deflink\n",
+				    link_id, vif, current->comm, task_pid_nr(current));
+		return &sta->deflink;
+	}
+
+	return mt792x_sta_to_link(sta, link_id);
+}
+
 void mt792x_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *control,
 	       struct sk_buff *skb)
 {
@@ -196,24 +215,114 @@ void mt792x_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *control,
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 	struct ieee80211_vif *vif = info->control.vif;
 	struct mt76_wcid *wcid = &dev->mt76.global_wcid;
+	struct mt76_wcid *orig_wcid = wcid;
 	u8 link_id;
 	int qid;
 
 	if (control->sta) {
 		struct mt792x_link_sta *mlink;
 		struct mt792x_sta *sta;
+
 		link_id = u32_get_bits(info->control.flags,
 				       IEEE80211_TX_CTRL_MLO_LINK);
 		sta = (struct mt792x_sta *)control->sta->drv_priv;
-		mlink = mt792x_sta_to_link(sta, link_id);
-		wcid = &mlink->wcid;
+		mlink = mt792x_mlo_tx_link(vif, sta, link_id);
+		orig_wcid = mlink ? &mlink->wcid : NULL;
+
+		wcid = orig_wcid;
+		if (dev->mt76.drv->tx_select_link)
+			wcid = dev->mt76.drv->tx_select_link(&dev->mt76, vif,
+							control->sta, skb, wcid);
+		if (!wcid) {
+			ieee80211_free_txskb(hw, skb);
+			return;
+		}
+		if (!orig_wcid)
+			orig_wcid = wcid;
 	}
 
 	if (vif && !control->sta) {
 		struct mt792x_vif *mvif;
+		struct mt792x_link_sta *mlink;
 
 		mvif = (struct mt792x_vif *)vif->drv_priv;
-		wcid = &mvif->sta.deflink.wcid;
+
+		/* Broadcast/multicast (ARP, DHCP, ...) has no control->sta,
+		 * so unlike the unicast path above this used to hardcode
+		 * mvif->sta.deflink -- a snapshot of whichever link was
+		 * first negotiated at initial single-link association, never
+		 * updated afterward. That is correct only while the deflink
+		 * itself stays part of active_links; once it is removed
+		 * (e.g. an MLO pair transition that drops the original
+		 * link), every broadcast frame kept aiming at that now-dead
+		 * WCID while the surviving link's own BMC WCID never saw any
+		 * broadcast TX at all -- live trace showed its tx_pkts stuck
+		 * at 0, which is exactly why ARP resolution died on the
+		 * surviving link after a remove/re-add cycle. Resolve the
+		 * link the same way the control->sta branch above already
+		 * does, from mac80211's own per-packet hint.
+		 */
+		link_id = u32_get_bits(info->control.flags,
+				       IEEE80211_TX_CTRL_MLO_LINK);
+		mlink = mt792x_mlo_tx_link(vif, &mvif->sta, link_id);
+		wcid = mlink ? &mlink->wcid : NULL;
+		orig_wcid = wcid;
+		if (dev->mt76.drv->tx_select_link)
+			wcid = dev->mt76.drv->tx_select_link(&dev->mt76, vif,
+							NULL, skb, wcid);
+		if (!wcid) {
+			ieee80211_free_txskb(hw, skb);
+			return;
+		}
+		if (!orig_wcid)
+			orig_wcid = wcid;
+	}
+
+	if (is_mt7927(&dev->mt76) && READ_ONCE(mt76_mlo_diag_trace)) {
+		struct mt76_mlo_tx_select_trace v = {};
+		struct mt76_mlo_pkt_sig sig;
+		u8 da[ETH_ALEN] = {};
+
+		if ((info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP) &&
+		    skb->len >= ETH_HLEN)
+			ether_addr_copy(da, skb->data);
+		else if (skb->len >= sizeof(struct ieee80211_hdr_3addr))
+			ether_addr_copy(da,
+				((struct ieee80211_hdr *)skb->data)->addr1);
+		v = (struct mt76_mlo_tx_select_trace) {
+			.hash = skb->hash, .protocol = ntohs(skb->protocol),
+			.orig_wcid = orig_wcid->idx, .sel_wcid = wcid->idx,
+			.path = 1, .priority = skb->priority,
+			.txq_tid = skb->priority & 0xf,
+			.qid = skb_get_queue_mapping(skb),
+			.orig_link = orig_wcid->link_id, .orig_phy = orig_wcid->phy_idx,
+			.sel_link = wcid->link_id, .sel_phy = wcid->phy_idx,
+			.info_link = u32_get_bits(info->control.flags, IEEE80211_TX_CTRL_MLO_LINK),
+			.l4_hash = skb->l4_hash, .sw_hash = skb->sw_hash,
+			.sta_present = !!control->sta, .vif_present = !!vif,
+		};
+		mt76_mlo_skb_pkt_sig(skb, &sig);
+		mt76_mlo_tx_select_set_pkt_sig(&v, &sig);
+		ether_addr_copy(v.da, da);
+		trace_mlo_tx_select(&dev->mt76, &v);
+	}
+
+	/* TEST-ONLY diagnostic: correlate Protected-EHT action frames (negotiated
+	 * TTLM req/res) through the MLD->link address translation below.
+	 */
+	if (is_mt7927(&dev->mt76) && READ_ONCE(mt76_mlo_diag_trace) &&
+	    !(info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP) &&
+	    skb->len >= sizeof(struct ieee80211_hdr_3addr) + 2) {
+		struct ieee80211_mgmt *m = (void *)skb->data;
+
+		if (ieee80211_is_action(m->frame_control) &&
+		    m->u.action.category == WLAN_CATEGORY_PROTECTED_EHT)
+			printk(KERN_INFO
+			      "TTLM_FRAME: PRE  action=%u sta_present=%d vif_mld=%d prot=%d a1=%pM a2=%pM a3=%pM wcid=%u wcid_link=%u\n",
+			      m->u.action.action_code,
+			      !!control->sta, vif ? ieee80211_vif_is_mld(vif) : -1,
+			      !!ieee80211_has_protected(m->frame_control),
+			      m->da, m->sa, m->bssid, wcid->idx, wcid->link_id);
 	}
 
 	if (vif && control->sta && ieee80211_vif_is_mld(vif) &&
@@ -222,17 +331,51 @@ void mt792x_tx(struct ieee80211_hw *hw, struct ieee80211_tx_control *control,
 		struct ieee80211_link_sta *link_sta;
 		struct ieee80211_bss_conf *conf;
 
+		/* Generic pre-DMA mutation safety, before writing native headers. */
+		if (skb->len < sizeof(struct ieee80211_hdr_3addr) ||
+		    skb_ensure_writable(skb, sizeof(struct ieee80211_hdr_3addr))) {
+			ieee80211_free_txskb(hw, skb);
+			return;
+		}
+		hdr = (void *)skb->data;
 		link_id = wcid->link_id;
 		rcu_read_lock();
 		conf = rcu_dereference(vif->link_conf[link_id]);
-		memcpy(hdr->addr2, conf->addr, ETH_ALEN);
-
 		link_sta = rcu_dereference(control->sta->link[link_id]);
+		if (!conf || !link_sta) {
+			rcu_read_unlock();
+			ieee80211_free_txskb(hw, skb);
+			return;
+		}
+
+		memcpy(hdr->addr2, conf->addr, ETH_ALEN);
 		memcpy(hdr->addr1, link_sta->addr, ETH_ALEN);
 
-		if (vif->type == NL80211_IFTYPE_STATION)
+		if (vif->type == NL80211_IFTYPE_STATION &&
+		    !(dev->mt76.drv->tx_preserve_addr3 &&
+		      dev->mt76.drv->tx_preserve_addr3(&dev->mt76, vif, skb)))
 			memcpy(hdr->addr3, conf->bssid, ETH_ALEN);
 		rcu_read_unlock();
+
+		if (is_mt7927(&dev->mt76) &&
+		    unlikely(READ_ONCE(mt76_mlo_diag_trace)) &&
+		    ieee80211_is_data(hdr->frame_control))
+			printk(KERN_INFO
+			       "MLO_TX_80211_LINKADDR: encap=0 wcid=%u link=%u fc=0x%04x a1=%pM a2=%pM a3=%pM\n",
+			       wcid->idx, wcid->link_id,
+			       le16_to_cpu(hdr->frame_control),
+			       hdr->addr1, hdr->addr2, hdr->addr3);
+
+		if (is_mt7927(&dev->mt76) && READ_ONCE(mt76_mlo_diag_trace) &&
+		    skb->len >= sizeof(struct ieee80211_hdr_3addr) + 2) {
+			struct ieee80211_mgmt *m = (void *)skb->data;
+
+			if (ieee80211_is_action(m->frame_control) &&
+			    m->u.action.category == WLAN_CATEGORY_PROTECTED_EHT)
+				printk(KERN_INFO
+				      "TTLM_FRAME: POST translated a1=%pM a2=%pM a3=%pM link_id=%u\n",
+				      m->da, m->sa, m->bssid, link_id);
+		}
 	}
 
 	if (mt76_connac_pm_ref(mphy, &dev->pm)) {
@@ -418,6 +561,10 @@ EXPORT_SYMBOL_GPL(mt792x_tx_worker);
 void mt792x_roc_timer(struct timer_list *timer)
 {
 	struct mt792x_phy *phy = timer_container_of(phy, timer, roc_timer);
+
+	if (is_mt7927(&phy->dev->mt76) && READ_ONCE(mt76_mlo_diag_trace))
+		printk(KERN_INFO "ROC_TIMER_FIRED: site=roc_timer token=%u mlo_links=0x%x\n",
+		       phy->roc_token_id, phy->mlo_roc.pending_links);
 
 	ieee80211_queue_work(phy->mt76->hw, &phy->roc_work);
 }
@@ -786,6 +933,17 @@ void mt792x_set_coverage_class(struct ieee80211_hw *hw, s16 coverage_class)
 }
 EXPORT_SYMBOL_GPL(mt792x_set_coverage_class);
 
+/* TEST-ONLY diagnostic (default N, load-time): do not advertise
+ * SUPPORTS_TX_ENCAP_OFFLOAD on MT7927 so mac80211 hands the driver 802.11
+ * frames (explicit per-link addressing) instead of 802.3 frames. Changes
+ * nothing else.
+ */
+static bool mt792x_test_mt7927_no_tx_encap;
+module_param_named(test_mt7927_no_tx_encap, mt792x_test_mt7927_no_tx_encap,
+		   bool, 0444);
+MODULE_PARM_DESC(test_mt7927_no_tx_encap,
+		 "TEST-ONLY: disable SUPPORTS_TX_ENCAP_OFFLOAD on MT7927 (default N)");
+
 int mt792x_init_wiphy(struct ieee80211_hw *hw)
 {
 	struct mt792x_phy *phy = mt792x_hw_phy(hw);
@@ -873,7 +1031,8 @@ int mt792x_init_wiphy(struct ieee80211_hw *hw)
 
 	ieee80211_hw_set(hw, SINGLE_SCAN_ON_ALL_BANDS);
 	ieee80211_hw_set(hw, HAS_RATE_CONTROL);
-	ieee80211_hw_set(hw, SUPPORTS_TX_ENCAP_OFFLOAD);
+	if (!(is_mt7927(&dev->mt76) && mt792x_test_mt7927_no_tx_encap))
+		ieee80211_hw_set(hw, SUPPORTS_TX_ENCAP_OFFLOAD);
 	ieee80211_hw_set(hw, SUPPORTS_RX_DECAP_OFFLOAD);
 	/* Under WANT_MONITOR_VIF, ieee80211_set_monitor_channel() redirects
 	 * any monitor vif's channel-set request onto mac80211's single
