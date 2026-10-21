@@ -21,7 +21,7 @@ fail()
 main=mt7925/mlo/radio.c
 mlo=mt7925/mlo/lifecycle.c
 param=mt7925/mlo/lifecycle.c
-hdr=mt7925/mt7925.h
+hdr=mt7925/mlo/decls.h
 roc_state=mt7925/mlo_roc_state.h
 
 fn() { sed -n "/^$1(/,/^}/p" "$2"; }
@@ -74,6 +74,6 @@ grep -q 'mt7925_mlo_same_token_extend_eligible(st, sel_links)' <<< "$d" ||
 
 # extern declared for cross-file use
 grep -q 'extern bool mt7925_mlo_same_token_extend;' $hdr ||
-	fail "mt7925_mlo_same_token_extend extern missing from mt7925.h"
+	fail "mt7925_mlo_same_token_extend extern missing from mlo/decls.h"
 
 echo "PASS: mlo_same_token_extend_contract"

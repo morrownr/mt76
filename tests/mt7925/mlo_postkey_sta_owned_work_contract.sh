@@ -35,7 +35,7 @@ for field in postkey_pending postkey_sublink_id postkey_survivor_id postkey_gene
 done
 
 # The old VIF-owned pending fields must be gone from mt7927_mlo_state.
-vif_state_struct=$(awk '/^struct mt7927_mlo_state \{/{flag=1} flag{print} flag && /^};/{exit}' mt792x.h)
+vif_state_struct=$(awk '/^struct mt7927_mlo_state \{/{flag=1} flag{print} flag && /^};/{exit}' mt792x_mlo_state.h)
 [[ -n $vif_state_struct ]] || fail "struct mt7927_mlo_state not found"
 for field in pending_sublink_roc pending_sublink_id pending_survivor_id pending_generation postkey_roc_attempted; do
 	if rg -q "$field" <<< "$vif_state_struct"; then

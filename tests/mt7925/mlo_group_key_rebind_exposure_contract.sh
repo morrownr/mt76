@@ -27,10 +27,10 @@ if ! rg -Fq 'int mt7925_mlo_group_key_rebind(' mt7925/mlo/association.c; then
 	fail "mt7925_mlo_group_key_rebind definition not found in main.c"
 fi
 
-# 2. A matching prototype must exist in mt7925.h (the shared internal
+# 2. A matching prototype must exist in mlo/decls.h (the shared internal
 #    header both main.c and mt7927_mlo.c already include).
-if ! rg -Fq 'mt7925_mlo_group_key_rebind(' mt7925/mt7925.h; then
-	fail "no mt7925_mlo_group_key_rebind() prototype declared in mt7925.h"
+if ! rg -Fq 'mt7925_mlo_group_key_rebind(' mt7925/mlo/decls.h; then
+	fail "no mt7925_mlo_group_key_rebind() prototype declared in mlo/decls.h"
 fi
 
 # 3. No second implementation -- exactly one definition of the function

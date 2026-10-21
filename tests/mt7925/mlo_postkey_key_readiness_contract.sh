@@ -21,7 +21,7 @@ fail()
 
 # 1. Separate GTK/IGTK/BIGTK counters exist on the shared result/ctx
 #    structs.
-result_struct=$(awk '/^struct mt7925_group_key_rebind_result \{/{flag=1} flag{print} flag && /^};/{exit}' mt7925/mt7925.h)
+result_struct=$(awk '/^struct mt7925_group_key_rebind_result \{/{flag=1} flag{print} flag && /^};/{exit}' mt7925/mlo/decls.h)
 [[ -n $result_struct ]] || fail "struct mt7925_group_key_rebind_result not found"
 for field in gtk_seen igtk_seen bigtk_seen; do
 	if ! rg -q "$field" <<< "$result_struct"; then

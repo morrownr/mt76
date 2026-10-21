@@ -10,6 +10,7 @@
 #include "mac.h"
 #include "mcu.h"
 #include "../trace.h"
+#include "../mt76_mlo_trace.h"
 #include "mlo/datapath.h"
 
 

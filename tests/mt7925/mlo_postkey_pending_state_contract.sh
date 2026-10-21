@@ -33,11 +33,11 @@ fi
 if ! rg -q 'module_param_named\(test_mt7927_sublink_postkey' mt7925/mlo/lifecycle.c; then
 	fail "test_mt7927_sublink_postkey is not registered as a module parameter"
 fi
-if ! rg -Fq 'extern bool mt7925_test_mt7927_sublink_postkey;' mt7925/mt7925.h; then
-	fail "mt7925_test_mt7927_sublink_postkey has no extern declaration in mt7925.h"
+if ! rg -Fq 'extern bool mt7925_test_mt7927_sublink_postkey;' mt7925/mlo/decls.h; then
+	fail "mt7925_test_mt7927_sublink_postkey has no extern declaration in mlo/decls.h"
 fi
-if ! rg -Fq 'extern bool mt7925_test_mt7927_sublink_roc;' mt7925/mt7925.h; then
-	fail "mt7925_test_mt7927_sublink_roc has no extern declaration in mt7925.h"
+if ! rg -Fq 'extern bool mt7925_test_mt7927_sublink_roc;' mt7925/mlo/decls.h; then
+	fail "mt7925_test_mt7927_sublink_roc has no extern declaration in mlo/decls.h"
 fi
 
 # 2. Pending-state fields live on mt792x_sta (peer-owned), not

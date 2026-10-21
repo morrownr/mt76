@@ -22,12 +22,12 @@ fail()
 }
 
 # 1. mt7925_mac_link_sta_remove() is exposed (non-static) for
-#    cross-translation-unit use, with a prototype in mt7925.h.
+#    cross-translation-unit use, with a prototype in mlo/decls.h.
 if rg -Fq 'static void mt7925_mac_link_sta_remove(' mt7925/main.c; then
 	fail "mt7925_mac_link_sta_remove() is still static -- mt7927_mlo.c cannot call it for real firmware rollback"
 fi
-if ! rg -Fq 'void mt7925_mac_link_sta_remove(struct mt76_dev' mt7925/mt7925.h; then
-	fail "mt7925_mac_link_sta_remove() has no prototype in mt7925.h"
+if ! rg -Fq 'void mt7925_mac_link_sta_remove(struct mt76_dev' mt7925/mlo/decls.h; then
+	fail "mt7925_mac_link_sta_remove() has no prototype in mlo/decls.h"
 fi
 
 prepare_body=$(awk '/^mt7927_mlo_postkey_prepare\(/{flag=1} flag{print} flag && /^}/{exit}' mt7925/mlo/lifecycle.c)

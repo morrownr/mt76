@@ -8,6 +8,7 @@
 #include "mt792x.h"
 #include "dma.h"
 #include "trace.h"
+#include "mt76_mlo_trace.h"
 
 /* timer_container_of was renamed from from_timer in kernel 6.16. */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)

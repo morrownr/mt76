@@ -5,6 +5,7 @@
 
 #include "mt76.h"
 #include "trace.h"
+#include "mt76_mlo_trace.h"
 
 /* Temporary, evidence-only MLO descriptor tracing. Disabled by default and
  * controlled through mt7925 debugfs mlo_diag_trace.

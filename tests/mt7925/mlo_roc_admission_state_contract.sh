@@ -28,10 +28,10 @@ fail()
 }
 
 # 1. Explicit per-link admission state must exist.
-if ! rg -q 'bool roc_admitted;' mt792x.h; then
+if ! rg -q 'bool roc_admitted;' mt792x.h mt792x_mlo_state.h; then
 	fail "struct mt7927_mlo_link_state has no explicit roc_admitted field"
 fi
-if ! rg -q 'u32 admitted_generation;' mt792x.h; then
+if ! rg -q 'u32 admitted_generation;' mt792x.h mt792x_mlo_state.h; then
 	fail "struct mt7927_mlo_link_state has no admitted_generation field for freshness checking"
 fi
 

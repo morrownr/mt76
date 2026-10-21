@@ -6,6 +6,7 @@
 #include "mcu.h"
 #include "mac.h"
 #include "../trace.h"
+#include "../mt76_mlo_trace.h"
 
 #include "mlo/tx_context.h"
 
