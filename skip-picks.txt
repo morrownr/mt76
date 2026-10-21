@@ -42,7 +42,10 @@ f8b59ca3  # fixes the PS buffering reverted here on 06-04. That code now needs m
 # openwrt ones, so a bare id here would be counted as a skip and throw the
 # tally off.
 
-# (none)
+# mt7921: add an option to keep the chip awake (#132)
+#   PR #134. For MT7921 cards that fail to wake from power saving and log
+#   "driver own failed". Not for upstream as it stands: wireless maintainers
+#   resist module options, and this avoids the failure without fixing it.
 
 # Section 3. Patches that have merged here.
 #
