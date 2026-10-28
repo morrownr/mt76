@@ -3831,7 +3831,8 @@ int mt7925_mcu_fill_message(struct mt76_dev *mdev, struct sk_buff *skb,
 			uni_txd->option = MCU_CMD_UNI_EXT_ACK;
 
 		if (cmd == MCU_UNI_CMD(HIF_CTRL) ||
-		    cmd == MCU_UNI_CMD(CHIP_CONFIG))
+		    cmd == MCU_UNI_CMD(CHIP_CONFIG) ||
+		    cmd == MCU_UNI_CMD(LED))
 			uni_txd->option &= ~MCU_CMD_ACK;
 
 		if (mcu_cmd == MCU_UNI_CMD_TESTMODE_CTRL ||
@@ -4229,5 +4230,26 @@ int mt7925_mcu_set_rssimonitor(struct mt792x_dev *dev, struct ieee80211_vif *vif
 	};
 
 	return mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(RSSI_MONITOR), &req,
+				 sizeof(req), false);
+}
+
+int mt7925_mcu_set_led(struct mt792x_dev *dev, u8 pin, bool on)
+{
+	struct {
+		u8 pin;
+		u8 _rsv[3];
+
+		__le16 tag;
+		__le16 len;
+		u8 on;
+		u8 _rsv2[3];
+	} __packed req = {
+		.pin = pin,
+		.tag = cpu_to_le16(UNI_CMD_LED_GPIO_CTRL),
+		.len = cpu_to_le16(sizeof(req) - 4),
+		.on = on,
+	};
+
+	return mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD(LED), &req,
 				 sizeof(req), false);
 }

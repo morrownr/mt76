@@ -190,6 +190,39 @@ static int mt7925_init_nan_cap(struct mt76_dev *mdev)
 }
 #endif
 
+static int mt7925_led_set_brightness(struct led_classdev *led_cdev,
+				     enum led_brightness brightness)
+{
+	struct mt76_phy *mphy = container_of(led_cdev, struct mt76_phy,
+					     leds.cdev);
+	struct mt792x_dev *dev = container_of(mphy->dev, struct mt792x_dev,
+					      mt76);
+	bool on = brightness != LED_OFF;
+	int ret = 0;
+
+	mt792x_mutex_acquire(dev);
+	if (!dev->pm.suspended)
+		ret = mt7925_mcu_set_led(dev, mphy->leds.pin,
+					 on ^ mphy->leds.al);
+	mt792x_mutex_release(dev);
+
+	return ret;
+}
+
+static void mt7925_init_led(struct mt792x_dev *dev)
+{
+	struct mt76_phy *mphy = &dev->mphy;
+
+	if (!IS_ENABLED(CONFIG_MT76_LEDS) || !mt76_is_usb(&dev->mt76) ||
+	    !is_mt7925(&dev->mt76))
+		return;
+
+	/* MediaTek's Windows driver uses GPIO 8 on MT7925 USB adapters */
+	mphy->leds.pin = 8;
+	mphy->leds.cdev.flags |= LED_HW_PLUGGABLE;
+	mphy->leds.cdev.brightness_set_blocking = mt7925_led_set_brightness;
+}
+
 static void mt7925_init_work(struct work_struct *work)
 {
 	struct mt792x_dev *dev = container_of(work, struct mt792x_dev,
@@ -214,6 +247,7 @@ static void mt7925_init_work(struct work_struct *work)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 	dev->mt76.init_wiphy = mt7925_init_nan_cap;
 #endif
+	mt7925_init_led(dev);
 
 	ret = mt76_register_device(&dev->mt76, true, mt76_rates,
 				   ARRAY_SIZE(mt76_rates));
