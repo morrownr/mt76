@@ -1211,6 +1211,8 @@ int mt7925_run_firmware(struct mt792x_dev *dev)
 {
 	int err;
 
+	dev->led_state = -1;
+
 	err = mt792x_load_firmware(dev);
 	if (err)
 		return err;
