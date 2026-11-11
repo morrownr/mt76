@@ -35,6 +35,10 @@ f3e79285  # USB TX leak, Eason's. Carried here as 69d63372, the same patch
 f8b59ca3  # fixes the PS buffering reverted here on 06-04. That code now needs mac80211 7.3
 06b69763  # mt7996 PS sync parsing, part of that same revert
 
+# Left out of the batch that caught up to openwrt 0936617d on 2026-11-11.
+f349872e  # firmware: update mt7990, mt7992 and mt7996 firmware to 202607. Not shipped here
+238538d7  # answer the flow priority query. Calls a mac80211 function no released kernel has, so the build breaks where WED is on
+
 # Section 2. Experimental/testing patches that have been merged here but have
 # not been sent upstream yet.
 #
