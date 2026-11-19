@@ -58,6 +58,12 @@ f349872e  # firmware: update mt7990, mt7992 and mt7996 firmware to 202607. Not s
 # and show-picks offers it as something we are missing. At that point it wants
 # a line in section 1, with the reason being that we already carry it.
 
+# mt7925: add LED support for USB adapters
+#   Josef Schlehofer's, merged 2026-11-18 as 141ac9a7 and 509df0d0 from PR #139.
+#   Sent upstream on 2026-11-03, 20261103133528.53197-1-pepe.schlehofer@gmail.com.
+#   GPIO 8 and active low are confirmed on the NETGEAR A9000 only. Another
+#   MT7925U stick may need its own pin or polarity, by USB ID.
+
 # mt7921 and mt7925: keep the sniffer on for real monitor vifs
 #   Patches 1 and 2 of the active monitor series sent upstream on 2026-10-27,
 #   20261027195803.711995-2 and -3-lucid_duck@justthetip.ca. Bring back the
